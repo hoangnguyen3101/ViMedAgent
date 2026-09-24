@@ -1,0 +1,7 @@
+# ViMedAgent v2 — client side only (runner + frameworks + metrics).
+# No torch/sglang needed here: the model is served by SGLang (scripts/serve_sglang*.sh)
+# and the runner only talks HTTP. Works on any python >= 3.10, x86 or aarch64 (GX10).
+#   pip install -r requirements-client.txt
+openai>=1.40
+scipy>=1.10
+numpy

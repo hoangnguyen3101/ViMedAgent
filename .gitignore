@@ -1,0 +1,39 @@
+# ── Experiment results — NEVER commit ─────────────────────
+# 179 JSONL files, ~425 MB. Git stores every version forever, so each
+# re-run would add another ~10 MB per seed to the history permanently.
+# Publish these through Zenodo / a GitHub Release asset / Git LFS instead.
+code/results/
+code/results_test/
+
+# Run manifests written next to each result file
+*.meta.json
+
+# ── Logs ──────────────────────────────────────────────────
+logs/
+*.log
+
+# ── Secrets — never commit ────────────────────────────────
+# Keys belong in environment variables only (see infrastructure/config.py).
+.env
+.env.*
+*.key
+*.pem
+**/secrets.*
+
+# ── Python ────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+venv/
+.venv/
+
+# ── Editor / OS ───────────────────────────────────────────
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# ── Claude Code local overrides (keep settings.json + hooks) ──
+.claude/settings.local.json
