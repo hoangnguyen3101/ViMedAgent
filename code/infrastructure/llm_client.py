@@ -1,7 +1,6 @@
 """
-ViMedAgent v2 — LLM Client (Groq + Ollama local + SGLang)
+ViMedAgent v2 — LLM Client (Ollama local + SGLang)
 
-Groq  : cloud API via https://api.groq.com/openai/v1
 Ollama: local API via http://localhost:11434/v1  (OpenAI-compatible) or the
         native /api/chat endpoint when think=False/True is requested
 SGLang: local OpenAI-compatible server (default http://127.0.0.1:30000/v1),
@@ -146,7 +145,7 @@ def call_llm(
     think: bool | None = None,
 ) -> str:
     """
-    Call Groq / Ollama / SGLang. Returns text response.
+    Call Ollama / SGLang. Returns text response.
     Retries on rate limits with exponential backoff.
     Ollama/SGLang do not enforce rate limits so backoff is only for connection errors.
 

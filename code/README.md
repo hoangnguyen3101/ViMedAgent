@@ -88,26 +88,23 @@ code/
 pip install openai scipy pandas openpyxl
 ```
 
-- `openai` — SDK gọi API (dùng chung cho cả Groq và Ollama vì đều tương thích chuẩn OpenAI).
+- `openai` — SDK gọi API (dùng chung cho Ollama và SGLang vì đều tương thích chuẩn OpenAI).
 - `scipy` — kiểm định thống kê (`fisher_exact`, `binomtest`).
 - `pandas`, `openpyxl` — đọc/ghi `Metric.xlsx`.
 
-### 3.2. Hai nhà cung cấp model (providers)
+### 3.2. Nhà cung cấp model (providers)
 
-Định nghĩa trong [infrastructure/config.py](infrastructure/config.py):
+Định nghĩa trong [infrastructure/config.py](infrastructure/config.py). **Tất cả đều chạy local** — không có provider cloud nào.
 
-| Provider | Base URL | API key | Vai trò thực tế trong dự án |
-|----------|----------|---------|------------------------------|
-| **groq** (cloud) | `https://api.groq.com/openai/v1` | cần `GROQ_API_KEY` | **CHỈ để TEST nhanh** trên `pilot_100` (100 câu). Nhanh nhưng có **rate limit** + chi phí → không kham nổi dữ liệu lớn |
-| **ollama** (local) | `http://localhost:11434/v1` | không cần (chuỗi `"ollama"`) | **CHẠY THẬT** trên toàn bộ `vm14k_clean` (~11k câu/seed). Chạy offline, không rate limit, không tốn tiền |
+| Provider | Base URL | API key | Vai trò |
+|----------|----------|---------|---------|
+| **ollama** | `http://localhost:11434/v1` | không cần | Chạy v1; gọi qua `/api/chat` native khi cần `think=False` |
+| **ollama2** | `http://127.0.0.1:11435/v1` | không cần | Instance riêng của hoangnv (`/storage/hoangnv/ollama-local`) |
+| **sglang** | `$SGLANG_BASE_URL` (mặc định `http://127.0.0.1:30000/v1`) | không cần | Backend của v2 — continuous batching + RadixAttention |
 
-> 🔑 **Groq = test, Ollama local = chạy thật.** Đây là quy ước vận hành thực tế của dự án, thấy rõ qua chính dữ liệu kết quả (xem [Mục 3.5](#35-groq--test-nhanh--ollama-local--chạy-thật-thực-tế-trong-repo)):
-> - **`results/`** (chạy thật, dataset `vm14k_clean` **11.094 câu/seed**) → **chỉ dùng `ollama-llama3.1-8b`** (local).
-> - **`results_test/`** (chạy thử, dataset `pilot_100` **100 câu**) → dùng model Groq (`llama-3.1-8b`, `llama-3.3-70b`, `qwen3-32b`).
->
-> Với khối lượng ~11k câu × 3 seed × nhiều framework, **bắt buộc dùng server local (Ollama)** để tránh rate limit/chi phí của Groq. Groq chỉ dùng cho vòng thử nghiệm nhanh trên 100 câu pilot.
-
-> ⚠️ **Lưu ý:** Trong `config.py`, tất cả các dòng `GROQ_API_KEY = ...` **hiện đang bị comment** — hợp lý vì luồng chạy thật dùng Ollama (không cần key). Chỉ khi muốn test bằng Groq mới phải **bật lại một dòng** (hoặc export biến môi trường `GROQ_API_KEY`), nếu không `get_api_key("groq")` sẽ báo `NameError`.
+> **Provider `groq` đã bị gỡ bỏ ngày 26/09/2026.** Không file kết quả nào trong repo chạy bằng Groq,
+> và 6 khoá Groq từng bị hardcode trong `config.py` phải coi là **đã lộ**. Nếu cần dùng lại cloud,
+> thêm provider mới và **chỉ đặt khoá qua biến môi trường** — không bao giờ ghi vào file.
 
 ### 3.3. Danh sách model khả dụng (`MODEL_NAMES`)
 
@@ -115,9 +112,6 @@ Chỉ những key **không bị comment** trong dict `MODELS` mới hợp lệ v
 
 | Tên (`--model`) | Provider | model_id |
 |-----------------|----------|----------|
-| `llama-3.3-70b` | groq | `llama-3.3-70b-versatile` |
-| `llama-3.1-8b`  | groq | `llama-3.1-8b-instant` |
-| `qwen3-32b`     | groq | `qwen/qwen3-32b` |
 | `ollama-llama3.1-8b`     | ollama | `llama3.1:8b` |
 | `ollama-qwen3-14b`       | ollama | `qwen3:14b` |
 | `ollama-qwen3-32b`       | ollama | `qwen3:32b` |
@@ -128,8 +122,6 @@ Chỉ những key **không bị comment** trong dict `MODELS` mới hợp lệ v
 | `sglang-llama3.3-70b`    | sglang | `casperhansen/llama-3.3-70b-instruct-awq` |
 | `sglang-deepseek-r1-14b` | sglang | `deepseek-ai/DeepSeek-R1-Distill-Qwen-14B` |
 | `sglang-medgemma-4b`     | sglang | `google/medgemma-4b-it` — xem 3.3.1 |
-
-> `deepseek-r1-70b` (Groq) **đang bị comment** → chưa dùng được (xem Mục 10).
 
 #### 3.3.1. MedGemma-4B — model duy nhất phá ba giả định của bảng
 
@@ -197,21 +189,47 @@ python -m runner.run_experiments --dataset data/vm14k_clean.jsonl \
 
 Các "token budget" (`MAX_TOKENS_SHORT=16`, `MAX_TOKENS_LONG=512`, `MAX_TOKENS_AGENT=600`...) giới hạn độ dài đầu ra theo từng loại lời gọi (đáp án 1 ký tự, suy luận CoT, phân tích chuyên gia...).
 
-### 3.5. Groq = test nhanh / Ollama local = chạy thật (thực tế trong repo)
+**Nhiệt độ gắn với FRAMEWORK, không gắn với model.** Mọi backbone (8B / 32B / 70B / MedGemma-4B)
+đều dùng cùng giá trị, vì trục so sánh của bài là năng lực backbone chứ không phải cách lấy mẫu.
+Chỉ có hai ngoại lệ, cả hai đều theo paper gốc:
 
-Bằng chứng lấy trực tiếp từ các file kết quả có sẵn:
+| Framework | T | Vì sao |
+|---|---|---|
+| `cot_sc` | **0,5** | k=5 đường phải khác nhau, không thì bỏ phiếu vô nghĩa (Wang et al.) |
+| `self_refine` bước `critique` | **0,0** | phán "đúng/sai" phải tất định, không để ngẫu nhiên quyết định có lặp thêm vòng (Madaan et al.) |
+| tất cả còn lại | **0,3** | |
 
-| | `results/` — **CHẠY THẬT** | `results_test/` — **CHẠY THỬ** |
+> `voting_ensemble` chạy T=0,3 và lấy đa dạng từ **xáo thứ tự đáp án**; `cot_sc` chạy T=0,5 và lấy
+> đa dạng từ **lấy mẫu**. Hai cơ chế cùng là "chạy k lần rồi đếm phiếu" nhưng khác cả nguồn đa dạng
+> lẫn nhiệt độ — nếu kết quả lệch nhau thì **không quy được về một trong hai**. Phải nói rõ trong Methods.
+
+#### 3.4.1. Cửa sổ context — KHÔNG đồng nhất giữa các model
+
+| Model | Tag / cấu hình | Context |
+|---|---|---|
+| `ollama-llama3.1-8b` | `llama3.1-8b-ctx8k` | 8192 |
+| `ollama-qwen3-32b` | `qwen3-32b-ctx8k` | 8192 |
+| **`ollama-llama3.3-70b`** | **`llama3.3-70b-ctx4k`** | **4096** |
+| `sglang-*` | `CONTEXT_LEN` của script serve | 8192 |
+
+70B chạy ở **nửa** context của hai model kia. Lý do phần cứng ghi tại `config.py` mục `ollama-llama3.3-70b`:
+bản ctx8k phình lên 57 GB trên card 48 GiB → Ollama chia 13% CPU/87% GPU → timeout >300 s mỗi lời gọi;
+ctx4k vừa 49 GB, chạy 100% GPU, ~0,3 s/lời gọi. Prompt dài nhất đo được trên `vm14k_clean` là **~2475
+token** (MedAgents) nên 4096 vẫn dư — nhưng **phải khai điểm lệch này trong Methods**, và lưu ý con số
+2475 đo cho MedAgents, chưa đo riêng `mad_debate` (nhánh này nhồi toàn văn phản hồi của các agent khác
+qua 3 vòng, là ứng viên vượt 4096 thật sự).
+
+### 3.5. `results/` vs `results_test/`
+
+Đường dẫn ghi kết quả chọn theo **tên dataset**: stem bắt đầu bằng `pilot` → `results_test/`, còn lại → `results/`.
+
+| | `results/` — CHẠY THẬT | `results_test/` — CHẠY THỬ |
 |---|---|---|
 | **Dataset** | `vm14k_clean` (**11.094 câu/seed**) | `pilot_100` (**100 câu/seed**) |
-| **Provider** | **Ollama (local)** | **Groq (cloud)** |
-| **Model** | `ollama-llama3.1-8b` | `llama-3.1-8b`, `llama-3.3-70b`, `qwen3-32b` |
-| **Framework đã chạy** | Tier 1 (`zero_shot`, `cot`, `cot_sc`, `self_refine`) | cả Tier 1 + `voting_ensemble` + `medagents` |
+| **Mục đích** | số liệu đưa vào paper | kiểm pipeline, đo thời gian trước khi chạy full |
 
-**Kết luận vận hành:**
-- Khi **chạy thật với dữ liệu lớn** → dùng `--model ollama-llama3.1-8b` (hoặc `ollama-qwen3-*`), sau khi đã cài Ollama và `ollama pull llama3.1:8b`. **Không** dùng Groq cho `vm14k_clean`.
-- Khi **thử nghiệm nhanh** để kiểm tra pipeline / so sánh nhiều model mạnh → dùng model Groq trên `pilot_100`.
-- Vì vậy các lệnh chép từ sheet `Run` (Mục 10) — vốn ghi model Groq kèm `vm14k_clean` — **cần đổi `--model` sang `ollama-*`** nếu muốn tái hiện đúng luồng chạy thật.
+Luôn chạy `pilot_100` trước khi chạy full: nó phát hiện lỗi prompt/parse/OOM trong vài phút
+thay vì vài chục giờ.
 
 > Cài & khởi động Ollama trước khi chạy thật:
 > ```bash
@@ -326,9 +344,17 @@ Mọi framework nhận `(question, options, model)` và trả về một `dict` 
 | `voting_ensemble` | 3 | n=3 shuffle |
 | `medagents` | 9 | 2N+3, N=3 |
 | `medagents_vi` | 8 | 2N+2, bỏ bước gather |
-| `mdagents` | 2 / 4 / 7 | tùy Low/Moderate/High |
-| `mdagents_vi` | 2 / 4 / 7 | định tuyến bằng difficulty_level |
+| `mdagents` | 2 / 4 / 7 | 1 (router) + Low 1 / Moderate 3 / High 6 |
+| `mdagents_vi` | **1 / 3 / 6** | đọc `difficulty_level` từ dataset → **không tốn lời gọi router** |
 | `mad_debate` | ≤ 9 | N × vòng, có early stop |
+
+**Chi phí thực đo** trên `vm14k_clean` (n=11.094; Easy 32,1% / Medium 56,9% / Challenging 10,2% / Hard 0,8%):
+`mdagents_vi` trung bình **2,69 lời gọi/câu** — khớp với 2,9–4,8 quan sát được theo cửa sổ 10 câu.
+
+> **`api_calls` KHÔNG phải thước đo chi phí đủ.** Đo trên 5 câu thật: nhánh Low (PCC, 1 lời gọi)
+> sinh 140 token ra, nhánh Moderate (MDT, 3 lời gọi) chỉ sinh 6 token ra. Đếm theo lời gọi thì
+> Moderate đắt gấp 3; đếm theo token ra thì Moderate **rẻ hơn 23 lần**. Đây là lý do runner ghi
+> `tokens_in`/`tokens_out` (xem Mục 6) — bảng chi phí phải dùng token, không dùng số lời gọi.
 
 ---
 
@@ -337,7 +363,7 @@ Mọi framework nhận `(question, options, model)` và trả về một `dict` 
 [runner/run_experiments.py](runner/run_experiments.py) là driver chính.
 
 - **`dispatch(framework, sample, model, seed)`** — định tuyến tới đúng runner. Gọi `random.seed(seed)` **trước** để mọi ngẫu nhiên ở tầng Python (đặc biệt shuffle của `voting_ensemble`) **tái lập được** theo seed.
-  > Lưu ý: Groq **không** hỗ trợ tham số `seed` cho lời gọi LLM → sự khác biệt giữa các seed đến từ **sampling ngẫu nhiên ở T>0**, không phải seed của model.
+  > Lưu ý: lời gọi LLM **không** truyền tham số `seed` xuống server → khác biệt giữa các seed đến từ **sampling ngẫu nhiên ở T>0** và từ `random.seed(seed)` ở tầng Python (shuffle của `voting_ensemble`), không phải seed của model.
 - **Resume (chạy tiếp):** kết quả ghi **append** vào JSONL. Khi chạy lại, `load_done_ids()` đọc các `id` đã xong và **bỏ qua** chúng. Dùng `--no-resume` để chạy lại từ đầu.
 - **Cấu trúc một record ghi ra:**
 
@@ -346,13 +372,20 @@ Mọi framework nhận `(question, options, model)` và trả về một `dict` 
   "id": "...", "seed": 42, "framework": "medagents", "model": "ollama-llama3.1-8b",
   "gold": "B", "answer": "B", "correct": true,      // correct = (answer == gold)
   "difficulty": "Medium", "topic": ["Cardiology"],
-  "api_calls": 8,
+  "api_calls": 8,                     // framework tự đếm
+  "tokens_in": 336, "tokens_out": 6,  // server báo thật (SGLang usage / Ollama *_eval_count)
+  "n_llm_calls": 8,                   // client đếm — PHẢI bằng api_calls, đây là kiểm chéo
+  "n_usage_missing": 0,               // >0 nghĩa là token là cận dưới, đừng báo cáo chi phí
   "individual_votes": ["B","B","C"],  // phiếu agent (Tier3) HOẶC k đường sampling (cot_sc/voting)
   "round1_answers": ["A","B","C"],
-  "audit_trail": [ ... ],
+  "audit_trail": [ ... ],             // mỗi bước gọi LLM đều có "raw" ĐẦY ĐỦ, không cắt
   "timestamp": "..."
 }
 ```
+  > **Kèm theo mỗi file kết quả là `<file>.jsonl.meta.json`** — manifest cấu hình lần chạy:
+  > `model_id`, `provider`, `base_url`, `temperature`, toàn bộ `MAX_TOKENS_*`, `n_samples`,
+  > host, phiên bản Python, và `runs[]` ghi lại từng lần chạy/chạy tiếp. Đây là thứ để tái lập
+  > mà tên file không nói được.
   > Cùng một trường `individual_votes` mang **hai ý nghĩa khác nhau**: với `cot_sc`/`voting_ensemble` nó là k lần thử độc lập (→ Pass@k); với MAS nó là phiếu agent trong **1** lần chạy (→ **không** dùng cho Pass@k).
 
 - **`--all`:** chạy trọn `EXPERIMENT_MATRIX` (10 framework × số model) × `N_RUNS` seed. Ví dụ 10×3 pairs × 3 seed.
@@ -453,9 +486,9 @@ python -m data.prepare_data --input /path/to/raw_vm14k.jsonl
 
 ## 10. CÁC CÂU LỆNH CHẠY (chạy thật bằng LOCAL / Ollama)
 
-Các lệnh dưới đây là **luồng chạy thật** trên toàn bộ `vm14k_clean` bằng **model local (Ollama)** — đúng như thực tế đã chạy trong `results/`. **Không gọi lên Groq.** Chạy từ **thư mục `code/`**.
+Các lệnh dưới đây là **luồng chạy thật** trên toàn bộ `vm14k_clean` bằng **model local** — đúng như thực tế đã chạy trong `results/`. Chạy từ **thư mục `code/`**.
 
-> Sheet `Run` gốc trong `Metric.xlsx` ghi model Groq (`llama-3.1-8b/llama-3.3-70b`) chỉ để **test nhanh trên `pilot_100`**. Với dữ liệu lớn ta **thay `--model` sang `ollama-*`** (xem [Mục 3.5](#35-groq--test-nhanh--ollama-local--chạy-thật-thực-tế-trong-repo)).
+> Sheet `Run` gốc trong `Metric.xlsx` ghi tên model theo provider cloud đã gỡ bỏ — khi tái hiện phải **thay `--model` sang `ollama-*` hoặc `sglang-*`** (xem [Mục 3.3](#33-danh-sách-model-khả-dụng-model_names)).
 
 ### Bước chuẩn bị (bắt buộc) — khởi động server local
 
@@ -510,7 +543,7 @@ Thay vì gõ từng lệnh, đặt model local mặc định rồi chạy `--all
 python -m runner.run_experiments --dataset data/vm14k_clean.jsonl --all
 ```
 
-> Lưu ý: `--all` chạy trọn `EXPERIMENT_MATRIX = ALL_FRAMEWORKS × MODEL_NAMES`. Nếu muốn `--all` **chỉ** dùng model local, hãy **comment các model Groq** trong dict `MODELS` của [config.py](infrastructure/config.py) để `MODEL_NAMES` chỉ còn các `ollama-*`.
+> Lưu ý: `--all` chạy trọn `EXPERIMENT_MATRIX = ALL_FRAMEWORKS × MODEL_NAMES` = **10 framework × 12 model = 120 cặp** × 3 seed. Muốn thu hẹp thì comment bớt model trong dict `MODELS` của [config.py](infrastructure/config.py).
 
 ### Chạy model 70B local trên RTX 8000 (48GB)
 
@@ -532,16 +565,13 @@ python -m runner.run_experiments --dataset data/vm14k_clean.jsonl --framework ze
 
 > ⚠️ 70B local trên RTX 8000 chạy **~8–14 tok/s** → rất chậm với ~11k câu × 3 seed. Nên **test trên `pilot_100` trước** để đo thời gian, ưu tiên Tier 1 (1 call/câu), hoặc giảm còn 1 seed.
 
-### (Tùy chọn) Test nhanh bằng Groq — KHÔNG dùng cho dữ liệu lớn
-
-Chỉ khi muốn đối chiếu nhanh trên 100 câu pilot với model mạnh (llama-3.3-70b, qwen3-32b). Cần bật `GROQ_API_KEY` trong [config.py](infrastructure/config.py):
+### Test nhanh trên pilot_100 trước khi chạy full
 
 ```bash
-python -m runner.run_experiments --dataset data/pilot_100.jsonl --framework zero_shot --model llama-3.3-70b
-python -m runner.run_experiments --dataset data/pilot_100.jsonl --framework zero_shot --model qwen3-32b
+python -m runner.run_experiments --dataset data/pilot_100.jsonl --framework zero_shot --model sglang-qwen3-32b
 ```
 
-> `deepseek-r1-70b` trong sheet `Run` gốc **đang bị comment** trong `config.py` → không dùng được cho tới khi bỏ comment.
+Ghi vào `results_test/`, không đụng `results/`.
 
 ---
 

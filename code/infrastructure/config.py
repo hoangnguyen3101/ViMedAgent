@@ -13,33 +13,13 @@ All other settings are referenced by the rest of the codebase via imports.
 import os
 
 # ── API ───────────────────────────────────────────────────
-# Doc tu bien moi truong, KHONG bao gio ghi khoa vao file nay.
-#   export GROQ_API_KEY=...
-# 6 khoa Groq tung bi hardcode o day (da comment) bi xoa ngay 24/09/2026 —
-# chung phai duoc COI LA DA LO va thu hoi tren console, vi da nam plaintext
-# tren dia. Chuoi rong lam get_api_key("groq") tra ve "" thay vi NameError.
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+# Provider "groq" da bi go bo ngay 26/09/2026. Ly do: khong co ket qua nao
+# trong repo chay bang Groq, va 6 khoa Groq tung bi hardcode o day phai coi
+# la DA LO. Khong bao gio ghi khoa vao file nay — chi dung bien moi truong.
+# Hai provider con lai: "ollama" / "ollama2" (native) va "sglang".
 
 # ── Models ────────────────────────────────────────────────
 MODELS: dict[str, dict] = {
-
-    # ── Groq (cloud) ──────────────────────────────────────
-    "llama-3.3-70b": {
-        "provider": "groq",
-        "model_id": "llama-3.3-70b-versatile",
-    },
-    "llama-3.1-8b": {
-        "provider": "groq",
-        "model_id": "llama-3.1-8b-instant",
-    },
-    "qwen3-32b": {
-        "provider": "groq",
-        "model_id": "qwen/qwen3-32b",
-    },
-    # "deepseek-r1-70b": {
-    #     "provider": "groq",
-    #     "model_id": "deepseek-r1-distill-llama-70b",
-    # },
 
     # ── Local (Ollama) ─────────────────────────────────────
     # Install: https://ollama.com/download
@@ -164,8 +144,6 @@ SGLANG_API_KEY  = os.environ.get("SGLANG_API_KEY", "sglang")   # only if server 
 
 
 def get_api_key(provider: str) -> str:
-    if provider == "groq":
-        return GROQ_API_KEY
     if provider in OLLAMA_PROVIDERS:
         return "ollama"     # Ollama does not require a real API key
     if provider == "sglang":
@@ -174,8 +152,6 @@ def get_api_key(provider: str) -> str:
 
 
 def get_base_url(provider: str) -> str:
-    if provider == "groq":
-        return "https://api.groq.com/openai/v1"
     if provider == "ollama":
         return "http://localhost:11434/v1"
     if provider == "ollama2":
@@ -213,7 +189,6 @@ NUM_WORKERS = 4
 # cache is full. 32 is a safe default for a 32B-AWQ model on one 48GB card;
 # raise on bigger cards. Override without editing: export VIMED_NUM_WORKERS=64
 NUM_WORKERS_BY_PROVIDER = {
-    "groq":   4,
     "ollama": NUM_WORKERS,
     "ollama2": NUM_WORKERS,
     "sglang": 32,

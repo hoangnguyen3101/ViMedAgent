@@ -59,8 +59,8 @@ def dispatch(framework: str, sample: dict, model: str, seed: int) -> dict:
     # Set Python random seed for reproducibility.
     # voting_ensemble also calls random.seed(seed) internally — that is
     # intentional so the shuffle sequence is deterministic per seed.
-    # For LLM calls, Groq does not support a seed parameter; diversity
-    # across seeds comes from temperature=0.3 stochastic sampling.
+    # Neither Ollama nor SGLang is given a seed parameter for the LLM call
+    # itself; diversity across seeds comes from temperature=0.3 sampling.
     random.seed(seed)
 
     q     = sample["question"]
@@ -159,7 +159,7 @@ def _write_manifest(out_path, framework, model, dataset_path, seed, n_samples) -
         "model":         model,
         "model_id":      spec.get("model_id"),
         "provider":      provider,
-        "base_url":      get_base_url(provider) if provider and provider != "groq" else None,
+        "base_url":      get_base_url(provider) if provider else None,
         "dataset":       os.path.abspath(dataset_path),
         "n_samples":     n_samples,
         "seed":          seed,
