@@ -122,6 +122,9 @@ Chỉ những key **không bị comment** trong dict `MODELS` mới hợp lệ v
 | `sglang-llama3.3-70b`    | sglang | `casperhansen/llama-3.3-70b-instruct-awq` |
 | `sglang-deepseek-r1-14b` | sglang | `deepseek-ai/DeepSeek-R1-Distill-Qwen-14B` |
 | `sglang-medgemma-4b`     | sglang | `google/medgemma-4b-it` — xem 3.3.1 |
+| `sglang-gemma3-4b`       | sglang | `google/gemma-3-4b-it` — đối chứng của MedGemma, xem 3.3.1 |
+| `litellm-llama3.3-70b-awq` | litellm | model group `Llama-3.3-70B` trên GX10 (AWQ) |
+| `litellm-qwen2.5-72b`    | litellm | model group `Qwen2.5-72B` trên GX10 (GPTQ-Int4) |
 
 #### 3.3.1. MedGemma-4B — model duy nhất phá ba giả định của bảng
 

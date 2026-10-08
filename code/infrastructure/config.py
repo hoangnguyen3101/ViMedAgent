@@ -130,6 +130,44 @@ MODELS: dict[str, dict] = {
         # Trọng số 8,01 GB.
         "model_id": "google/medgemma-4b-it",
     },
+    "sglang-gemma3-4b": {
+        "provider": "sglang",
+        # Đối chứng của MedGemma-4B: cùng nền Gemma 3 4B, cùng cỡ, KHÔNG tinh
+        # chỉnh y khoa → hiệu số MedGemma − Gemma3 là tác dụng riêng của y khoa hoá.
+        # Phải chạy CÙNG độ chính xác với sglang-medgemma-4b (mặc định bf16),
+        # không thì hiệu số lẫn cả ảnh hưởng của lượng tử hoá.
+        # Repo bị khoá (gated=manual): xin quyền tại
+        #   https://huggingface.co/google/gemma-3-4b-it  (có thể phải chờ duyệt).
+        # Hướng dẫn cài + chạy local: README.md mục "Gemma-3-4B / MedGemma-4B".
+        "model_id": "google/gemma-3-4b-it",
+    },
+
+    # ── Remote (LiteLLM proxy → SGLang trên GX10, qua Tailscale) ──
+    # Không tải trọng số về máy này: gọi server GX10 qua proxy LiteLLM.
+    # Endpoint + khoá CHỈ lấy từ biến môi trường (xem LITELLM_BASE_URL bên dưới).
+    # model_id là tên model group trong LiteLLM, không phải HF repo id.
+    #
+    # Server phải chạy với --disable-radix-cache: ngày 26/09/2026 đo được radix
+    # cache của image GX10 trả rác ("2.1.1.1…") khi prefix lặp lại, và chat
+    # template sai (prompt_tokens 23 thay vì 48 cho cùng câu "2+2") — cả hai đã
+    # sửa phía server. Kiểm lại bằng scripts/litellm_smoke_test.py trước mỗi đợt chạy.
+    # 27/09/2026: server đổi weights sang casperhansen/llama-3.3-70b-instruct-awq
+    # nhưng GIỮ tên model group "Llama-3.3-70B". Key cũ "litellm-llama3.3-70b"
+    # (weights trước đó, không rõ bản nào) đã bị gỡ và xoá hết kết quả — đừng
+    # tạo lại key trùng tên đó, kẻo lẫn với các run của weights khác.
+    "litellm-llama3.3-70b-awq": {
+        "provider": "litellm",
+        "model_id": "Llama-3.3-70B",
+    },
+    "litellm-qwen2.5-72b": {
+        "provider": "litellm",
+        # SGLang trên GX10: --model-path Qwen/Qwen2.5-72B-Instruct-GPTQ-Int4
+        # (GPTQ int4 — cùng hạng 4-bit với các model khác, nhưng khác KIỂU
+        # lượng tử hoá: AWQ cho sglang-*, GGUF Q4_K_M cho ollama-*; khai trong Methods).
+        # Qwen2.5 không có chế độ thinking → think=False không có tác dụng, đúng.
+        # model_id = tên model group trong LiteLLM config.yaml, phải khớp chính xác.
+        "model_id": "Qwen2.5-72B",
+    },
 }
 
 
@@ -142,12 +180,21 @@ OLLAMA_PROVIDERS = ("ollama", "ollama2")
 SGLANG_BASE_URL = os.environ.get("SGLANG_BASE_URL", "http://127.0.0.1:30000/v1")
 SGLANG_API_KEY  = os.environ.get("SGLANG_API_KEY", "sglang")   # only if server started with --api-key
 
+# LiteLLM proxy trên GX10 (qua Tailscale). Cùng tên biến với file .env của máy
+# chạy client, nên chỉ cần:  set -a; . /home/ailab/A2I/.env; set +a
+LITELLM_BASE_URL = os.environ.get("LITELLM_BASE_URL") or os.environ.get("OPENAI_BASE_URL", "")
+LITELLM_API_KEY  = os.environ.get("LITELLM_API_KEY")  or os.environ.get("OPENAI_API_KEY", "")
+
 
 def get_api_key(provider: str) -> str:
     if provider in OLLAMA_PROVIDERS:
         return "ollama"     # Ollama does not require a real API key
     if provider == "sglang":
         return SGLANG_API_KEY
+    if provider == "litellm":
+        if not LITELLM_API_KEY:
+            raise ValueError("provider litellm: chưa đặt OPENAI_API_KEY / LITELLM_API_KEY")
+        return LITELLM_API_KEY
     raise ValueError(f"Unknown provider: {provider}")
 
 
@@ -161,6 +208,10 @@ def get_base_url(provider: str) -> str:
         return "http://127.0.0.1:11435/v1"
     if provider == "sglang":
         return SGLANG_BASE_URL
+    if provider == "litellm":
+        if not LITELLM_BASE_URL:
+            raise ValueError("provider litellm: chưa đặt OPENAI_BASE_URL / LITELLM_BASE_URL")
+        return LITELLM_BASE_URL
     raise ValueError(f"Unknown provider: {provider}")
 
 
@@ -192,6 +243,7 @@ NUM_WORKERS_BY_PROVIDER = {
     "ollama": NUM_WORKERS,
     "ollama2": NUM_WORKERS,
     "sglang": 32,
+    "litellm": 32,   # đo 26/09: cot 32 song song ≈ 102 tok/s tổng, không lỗi
 }
 
 

@@ -135,6 +135,136 @@ So sánh 2 backend trên cùng framework/dataset: `python scripts/compare_result
 
 ---
 
+## Gemma-3-4B / MedGemma-4B — cài SGLang và chạy local (không gọi API)
+
+Hai model 4B chạy **trên chính máy có GPU**: runner và server SGLang cùng một máy, runner gọi
+`http://127.0.0.1:<port>`. Không qua LiteLLM, không qua Tailscale, nên không bị lỗi mạng như khi gọi
+server từ xa.
+
+| Key `--model` | HF repo | Vai trò |
+|---|---|---|
+| `sglang-gemma3-4b` | `google/gemma-3-4b-it` | đối chứng: cùng nền Gemma 3 4B, **không** tinh chỉnh y khoa |
+| `sglang-medgemma-4b` | `google/medgemma-4b-it` | model y khoa |
+
+Hiệu số MedGemma − Gemma3 là tác dụng riêng của tinh chỉnh y khoa, **nên phải chạy hai model trong cùng
+điều kiện**: cùng máy, cùng độ chính xác (mặc định bf16), cùng `CONTEXT_LEN`. Ba điểm phải khai trong
+Methods: xem `code/README.md` mục 3.3.1.
+
+### 0. Yêu cầu
+
+- **GPU ≥ 16 GB VRAM trống** cho mỗi model: 8 GB trọng số bf16 + KV cache. **Ampere trở lên (sm ≥ 80)**
+  để chạy bf16 gốc. Trên Turing (sm75, ví dụ Quadro RTX 8000), SGLang ép bf16 → fp16, mà họ Gemma có tiền
+  sử tràn số ở fp16. Phải kiểm tra đầu ra (bước 5) trước khi tin kết quả.
+  Máy `ailab` (GTX 1650, 4 GB) **không chạy được**.
+- **Quyền tải model.** Cả hai repo đều bị khoá. Đăng nhập Hugging Face, bấm đồng ý điều khoản ở
+  <https://huggingface.co/google/gemma-3-4b-it> (`gated=manual`, có thể phải chờ duyệt) và
+  <https://huggingface.co/google/medgemma-4b-it>, rồi tạo token đọc ở <https://huggingface.co/settings/tokens>.
+  Đừng ghi token vào file nào trong repo.
+- **Client:** `openai`, `scipy` (`pip install -r code/requirements-client.txt`, hoặc dùng env `medagent`).
+
+### 1. Cài SGLang
+
+```bash
+cd ViMedAgent/code
+
+# Máy x86 + GPU NVIDIA: conda env "sglang" (sglang + torch, ~11 GB, ~6 phút)
+bash scripts/x86_cuda/install_sglang.sh
+python scripts/x86_cuda/sglang_turing_probe.py      # chỉ cần nếu GPU sm < 80
+
+# ASUS GX10 / DGX Spark (GB10): dùng docker image dựng sẵn, KHÔNG dùng install_sglang.sh
+bash scripts/install_gx10.sh                          # docker pull + client deps
+```
+
+### 2. Tải model (một lần)
+
+```bash
+export HF_TOKEN=hf_xxx            # chỉ export trong shell, không ghi vào file
+# x86 (env sglang):
+conda run -n sglang huggingface-cli download google/gemma-3-4b-it
+conda run -n sglang huggingface-cli download google/medgemma-4b-it
+# GX10 (tải bằng container, file thuộc user hiện tại):
+MODEL=google/gemma-3-4b-it  bash scripts/install_gx10.sh
+MODEL=google/medgemma-4b-it bash scripts/install_gx10.sh
+```
+
+### 3. Chạy server (trong tmux, server chạy foreground)
+
+Mỗi server chỉ phục vụ **một** model. Dùng cổng **30001** để không đụng server 30000 đang chạy.
+
+```bash
+tmux new -s gemma
+cd ViMedAgent/code
+
+# x86: MEM_FRACTION là tỉ lệ VRAM của cả card. Chọn sao cho được ~16 GB
+#      (card 24 GB → 0.65; card 48 GB → 0.35)
+MODEL=google/gemma-3-4b-it PORT=30001 MEM_FRACTION=0.35 MAX_RUNNING=32 CONTEXT_LEN=8192 \
+  bash scripts/x86_cuda/serve_sglang.sh
+
+# GX10: MEM_GB là số GB tuyệt đối
+MODEL=google/gemma-3-4b-it PORT=30001 MEM_GB=16 CONTEXT_LEN=8192 HF_TOKEN=$HF_TOKEN \
+  bash scripts/serve_gx10.sh
+```
+
+Chờ dòng `The server is fired up and ready to roll!`, rồi tách khỏi tmux bằng `Ctrl-b d`. Đổi sang
+MedGemma: Ctrl-C server rồi chạy lại với `MODEL=google/medgemma-4b-it`.
+
+⚠️ **Trên GX10 khi server 70B (cổng 30000) đang chạy:** 70B đã giữ ~85 GB. Thêm 16 GB nữa vẫn vừa
+128 GB nhưng sát. Hai server dùng chung một GPU nên **cả hai cùng chậm đi**. Nên chạy Gemma khi 70B
+không có job.
+
+### 4. Trỏ runner vào server local
+
+```bash
+cd ViMedAgent/code
+export SGLANG_BASE_URL=http://127.0.0.1:30001/v1
+```
+
+`model_id` trong `config.py` phải trùng **chính xác** với `MODEL=` của server (SGLang lấy đường dẫn
+model làm tên phục vụ). Bước 5 kiểm tra điều này.
+
+### 5. Kiểm tra trước khi chạy
+
+```bash
+python scripts/sglang_smoke_test.py --model sglang-gemma3-4b
+#   đạt: [1] có google/gemma-3-4b-it, [2] has_think_tag=False, [3] trả 1 ký tự A–D, [4] null=0
+
+python -m runner.run_experiments --dataset data/pilot_100.jsonl --framework zero_shot --model sglang-gemma3-4b
+#   ghi vào results_test/. Xem Pass@1 và null: null > 0 hoặc đáp án lệch hẳn về một chữ cái
+#   → nghi tràn số fp16 (GPU sm<80) hoặc sai template. Dừng lại kiểm tra, đừng chạy full
+```
+
+### 6. Chạy full (tmux riêng; resume được)
+
+```bash
+tmux new -s run-gemma
+cd ViMedAgent/code && export SGLANG_BASE_URL=http://127.0.0.1:30001/v1 && mkdir -p ../logs
+for fw in zero_shot cot cot_sc self_refine voting_ensemble medagents medagents_vi mdagents mdagents_vi mad_debate; do
+  python -u -m runner.run_experiments --dataset data/vm14k_clean.jsonl --framework $fw \
+    --model sglang-gemma3-4b --workers 32
+done 2>&1 | tee -a ../logs/full_run_gemma3_4b.log
+```
+
+Làm lại y hệt cho `sglang-medgemma-4b`, sau khi đổi server sang MedGemma ở bước 3.
+
+- **Ngắt / chạy tiếp:** Ctrl-C hai lần rồi chạy lại đúng lệnh cũ. Runner bỏ qua các câu đã có trong file.
+- **Không trộn model:** tên file kết quả chứa key model (`sglang-gemma3-4b`), nhưng runner **không**
+  kiểm tra server đang phục vụ model nào. Đổi model trên server thì phải chạy lại bước 5 trước.
+- **Kiểm tra kết quả:** dùng skill `run-experiment` mục 4 (đủ n, `api_calls == n_llm_calls`,
+  `n_usage_missing = 0`, không trùng id).
+
+### Ghi chú cho Methods
+
+- **Temperature** do code cố định theo framework (0,3; 0,5 cho CoT-SC; 0,0 cho critique). Các tham số
+  sampling khác lấy theo `generation_config.json` của model (SGLang `sampling_defaults='model'`).
+  Gemma 3 dùng `top_k=64, top_p=0.95`.
+- Gemma 3 **không có thinking**. Cờ `enable_thinking=False` mà code gửi bị bỏ qua, không ảnh hưởng.
+- Template Gemma 3 **không có vai `system`**: nó gộp system message vào lượt user đầu. Các prompt
+  của repo luôn có dạng `[system, user]` hoặc `[user]` nên chạy được.
+- bf16, không lượng tử hoá, khác các model 32B/70B (4-bit). Nếu đổi sang 4-bit thì phải đổi **cả hai** model
+  4B và sửa `code/README.md` 3.3.1 + bảng "Ba điểm lệch" trong `CLAUDE.md`.
+
+---
+
 ## Vì sao đổi backend
 
 | | Ollama (v1) | SGLang (v2) |

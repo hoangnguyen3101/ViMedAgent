@@ -101,6 +101,29 @@ def result_dir(dataset_stem: str) -> str:
     return RESULTS_TEST_DIR if dataset_stem.startswith("pilot") else RESULTS_DIR
 
 
+def audit_trail_of(result: dict) -> list | None:
+    """audit_trail của framework; nếu framework không tự ghi thì dựng từ `raw`.
+
+    zero_shot / cot / cot_sc / voting_ensemble trả `raw` nhưng không có
+    audit_trail, nên trước 26/09/2026 output đầy đủ của chúng bị bỏ đi — không
+    parse lại được khi sửa parse_answer (xem exp 001). Dựng ở runner thay vì
+    sửa frameworks/ để frameworks vẫn giống hệt v1; schema không thêm trường.
+
+    voting_ensemble: `vote` là đáp án ĐÃ map về thứ tự gốc, còn `raw` là chữ
+    cái theo thứ tự đã xáo — hai cái có thể khác chữ, đó là đúng.
+    """
+    if result.get("audit_trail") is not None:
+        return result["audit_trail"]
+    raw = result.get("raw")
+    if raw is None:
+        return None
+    if isinstance(raw, list):
+        votes = result.get("individual_votes") or [None] * len(raw)
+        return [{"step": "sample", "index": i, "vote": v, "raw": r}
+                for i, (r, v) in enumerate(zip(raw, votes))]
+    return [{"step": "single", "answer": result.get("answer"), "raw": raw}]
+
+
 def result_path(framework: str, model: str, dataset_stem: str, seed: int) -> str:
     safe_model = model.replace("/", "_").replace(".", "_")
     return os.path.join(
@@ -284,7 +307,7 @@ def run_one_seed(
                         # token đo KHỐI LƯỢNG — hai trục chi phí khác nhau, phải có
                         # cả hai thì so sánh CoT-SC với MAS mới công bằng.
                         **(result.get("_usage") or {}),
-                        "audit_trail":    result.get("audit_trail"),
+                        "audit_trail":    audit_trail_of(result),
                         "timestamp":      datetime.utcnow().isoformat(),
                     }
 
