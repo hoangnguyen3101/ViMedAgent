@@ -135,31 +135,28 @@ So sánh 2 backend trên cùng framework/dataset: `python scripts/compare_result
 
 ---
 
-## Gemma-3-4B / MedGemma-4B — cài SGLang và chạy local (không gọi API)
+## Gemma-3-4B / MedGemma-4B (4-bit) — cài SGLang và chạy local (không gọi API)
 
 Hai model 4B chạy **trên chính máy có GPU**: runner và server SGLang cùng một máy, runner gọi
 `http://127.0.0.1:<port>`. Không qua LiteLLM, không qua Tailscale, nên không bị lỗi mạng như khi gọi
 server từ xa.
 
-| Key `--model` | HF repo | Vai trò |
+| Key `--model` | Weights | Trạng thái |
 |---|---|---|
-| `sglang-gemma3-4b` | `google/gemma-3-4b-it` | đối chứng: cùng nền Gemma 3 4B, **không** tinh chỉnh y khoa |
-| `sglang-medgemma-4b` | `google/medgemma-4b-it` | model y khoa |
+| `sglang-gemma3-4b-w4a16` | [`RedHatAI/gemma-3-4b-it-quantized.w4a16`](https://huggingface.co/RedHatAI/gemma-3-4b-it-quantized.w4a16) | **dùng ngay** (tải từ HF, không bị khoá) |
+| `sglang-medgemma-4b-w4a16` | `medgemma-4b-it-quantized.w4a16`, **tự lượng tử hoá** bằng `scripts/quantize_w4a16.py` | làm sau (xem cuối mục) |
 
-Hiệu số MedGemma − Gemma3 là tác dụng riêng của tinh chỉnh y khoa, **nên phải chạy hai model trong cùng
-điều kiện**: cùng máy, cùng độ chính xác (mặc định bf16), cùng `CONTEXT_LEN`. Ba điểm phải khai trong
-Methods: xem `code/README.md` mục 3.3.1.
+Cả hai là **W4A16**: GPTQ int4 theo nhóm 128, định dạng compressed-tensors. Các model 32B/70B cũng
+4-bit (AWQ). Hiệu số MedGemma − Gemma3 là tác dụng riêng của tinh chỉnh y khoa, **nên hai model phải
+lượng tử hoá cùng một cách**: MedGemma được tạo bằng **đúng recipe RedHatAI đã dùng** cho Gemma3 (cùng
+`recipe.yaml`, cùng dữ liệu calibration). Không dùng bản MedGemma 4-bit có sẵn trên HF, vì không bản nào làm
+theo recipe này.
 
 ### 0. Yêu cầu
 
-- **GPU ≥ 16 GB VRAM trống** cho mỗi model: 8 GB trọng số bf16 + KV cache. **Ampere trở lên (sm ≥ 80)**
-  để chạy bf16 gốc. Trên Turing (sm75, ví dụ Quadro RTX 8000), SGLang ép bf16 → fp16, mà họ Gemma có tiền
-  sử tràn số ở fp16. Phải kiểm tra đầu ra (bước 5) trước khi tin kết quả.
-  Máy `ailab` (GTX 1650, 4 GB) **không chạy được**.
-- **Quyền tải model.** Cả hai repo đều bị khoá. Đăng nhập Hugging Face, bấm đồng ý điều khoản ở
-  <https://huggingface.co/google/gemma-3-4b-it> (`gated=manual`, có thể phải chờ duyệt) và
-  <https://huggingface.co/google/medgemma-4b-it>, rồi tạo token đọc ở <https://huggingface.co/settings/tokens>.
-  Đừng ghi token vào file nào trong repo.
+- **GPU Ampere trở lên (sm ≥ 80), ≥ 12 GB VRAM trống.** Kernel W4A16 (Marlin) của SGLang cần sm ≥ 80.
+  Trọng số khoảng 3 GB (int4) + khoảng 0,8 GB tháp thị giác (giữ bf16, không dùng tới), còn lại là KV cache.
+  **GX10 chạy được.** Quadro RTX 8000 (Turing sm75) và máy `ailab` (GTX 1650) **không chạy được**.
 - **Client:** `openai`, `scipy` (`pip install -r code/requirements-client.txt`, hoặc dùng env `medagent`).
 
 ### 1. Cài SGLang
@@ -167,24 +164,20 @@ Methods: xem `code/README.md` mục 3.3.1.
 ```bash
 cd ViMedAgent/code
 
-# Máy x86 + GPU NVIDIA: conda env "sglang" (sglang + torch, ~11 GB, ~6 phút)
-bash scripts/x86_cuda/install_sglang.sh
-python scripts/x86_cuda/sglang_turing_probe.py      # chỉ cần nếu GPU sm < 80
+# ASUS GX10 / DGX Spark (GB10): docker image dựng sẵn. KHÔNG dùng install_sglang.sh
+bash scripts/install_gx10.sh
 
-# ASUS GX10 / DGX Spark (GB10): dùng docker image dựng sẵn, KHÔNG dùng install_sglang.sh
-bash scripts/install_gx10.sh                          # docker pull + client deps
+# Máy x86 + GPU Ampere trở lên (A100, A6000, RTX 30xx/40xx...): conda env "sglang"
+bash scripts/x86_cuda/install_sglang.sh
 ```
 
 ### 2. Tải model (một lần)
 
 ```bash
-export HF_TOKEN=hf_xxx            # chỉ export trong shell, không ghi vào file
-# x86 (env sglang):
-conda run -n sglang huggingface-cli download google/gemma-3-4b-it
-conda run -n sglang huggingface-cli download google/medgemma-4b-it
 # GX10 (tải bằng container, file thuộc user hiện tại):
-MODEL=google/gemma-3-4b-it  bash scripts/install_gx10.sh
-MODEL=google/medgemma-4b-it bash scripts/install_gx10.sh
+MODEL=RedHatAI/gemma-3-4b-it-quantized.w4a16 bash scripts/install_gx10.sh
+# x86 (env sglang):
+conda run -n sglang huggingface-cli download RedHatAI/gemma-3-4b-it-quantized.w4a16
 ```
 
 ### 3. Chạy server (trong tmux, server chạy foreground)
@@ -195,21 +188,20 @@ Mỗi server chỉ phục vụ **một** model. Dùng cổng **30001** để kh�
 tmux new -s gemma
 cd ViMedAgent/code
 
-# x86: MEM_FRACTION là tỉ lệ VRAM của cả card. Chọn sao cho được ~16 GB
-#      (card 24 GB → 0.65; card 48 GB → 0.35)
-MODEL=google/gemma-3-4b-it PORT=30001 MEM_FRACTION=0.35 MAX_RUNNING=32 CONTEXT_LEN=8192 \
-  bash scripts/x86_cuda/serve_sglang.sh
-
-# GX10: MEM_GB là số GB tuyệt đối
-MODEL=google/gemma-3-4b-it PORT=30001 MEM_GB=16 CONTEXT_LEN=8192 HF_TOKEN=$HF_TOKEN \
+# GX10 (MEM_GB là số GB tuyệt đối):
+MODEL=RedHatAI/gemma-3-4b-it-quantized.w4a16 PORT=30001 MEM_GB=12 CONTEXT_LEN=8192 \
   bash scripts/serve_gx10.sh
+
+# x86 (MEM_FRACTION là tỉ lệ VRAM của cả card; chọn để được ~12 GB, vd card 24 GB → 0.5):
+MODEL=RedHatAI/gemma-3-4b-it-quantized.w4a16 PORT=30001 MEM_FRACTION=0.5 MAX_RUNNING=32 CONTEXT_LEN=8192 \
+  bash scripts/x86_cuda/serve_sglang.sh
 ```
 
-Chờ dòng `The server is fired up and ready to roll!`, rồi tách khỏi tmux bằng `Ctrl-b d`. Đổi sang
-MedGemma: Ctrl-C server rồi chạy lại với `MODEL=google/medgemma-4b-it`.
+Chờ dòng `The server is fired up and ready to roll!`, rồi tách khỏi tmux bằng `Ctrl-b d`. Trong log lúc
+khởi động phải có `compressed-tensors` hoặc `marlin`. Nếu thấy lỗi kernel thì GPU không đủ sm ≥ 80.
 
-⚠️ **Trên GX10 khi server 70B (cổng 30000) đang chạy:** 70B đã giữ ~85 GB. Thêm 16 GB nữa vẫn vừa
-128 GB nhưng sát. Hai server dùng chung một GPU nên **cả hai cùng chậm đi**. Nên chạy Gemma khi 70B
+⚠️ **Trên GX10 khi server 70B (cổng 30000) đang chạy:** 70B đã giữ khoảng 85 GB, thêm 12 GB vẫn vừa
+128 GB. Nhưng hai server dùng chung một GPU nên **cả hai cùng chậm đi**. Nên chạy Gemma khi 70B
 không có job.
 
 ### 4. Trỏ runner vào server local
@@ -219,49 +211,73 @@ cd ViMedAgent/code
 export SGLANG_BASE_URL=http://127.0.0.1:30001/v1
 ```
 
-`model_id` trong `config.py` phải trùng **chính xác** với `MODEL=` của server (SGLang lấy đường dẫn
-model làm tên phục vụ). Bước 5 kiểm tra điều này.
+`model_id` trong `config.py` phải trùng **chính xác** với tên server phục vụ. Mặc định tên này là giá trị
+`MODEL=`, tức `RedHatAI/gemma-3-4b-it-quantized.w4a16`. Bước 5 kiểm tra điều này.
 
 ### 5. Kiểm tra trước khi chạy
 
 ```bash
-python scripts/sglang_smoke_test.py --model sglang-gemma3-4b
-#   đạt: [1] có google/gemma-3-4b-it, [2] has_think_tag=False, [3] trả 1 ký tự A–D, [4] null=0
+python scripts/sglang_smoke_test.py --model sglang-gemma3-4b-w4a16
+#   đạt: [1] server phục vụ RedHatAI/gemma-3-4b-it-quantized.w4a16, [2] has_think_tag=False,
+#        [3] trả 1 ký tự A–D, [4] null=0
 
-python -m runner.run_experiments --dataset data/pilot_100.jsonl --framework zero_shot --model sglang-gemma3-4b
-#   ghi vào results_test/. Xem Pass@1 và null: null > 0 hoặc đáp án lệch hẳn về một chữ cái
-#   → nghi tràn số fp16 (GPU sm<80) hoặc sai template. Dừng lại kiểm tra, đừng chạy full
+python -m runner.run_experiments --dataset data/pilot_100.jsonl --framework zero_shot --model sglang-gemma3-4b-w4a16
+#   ghi vào results_test/. Nếu null > 0 hoặc đáp án lệch hẳn về một chữ cái thì dừng lại kiểm tra,
+#   đừng chạy full
 ```
 
-### 6. Chạy full (tmux riêng; resume được)
+### 6. Chạy full (tmux riêng, resume được)
 
 ```bash
 tmux new -s run-gemma
 cd ViMedAgent/code && export SGLANG_BASE_URL=http://127.0.0.1:30001/v1 && mkdir -p ../logs
 for fw in zero_shot cot cot_sc self_refine voting_ensemble medagents medagents_vi mdagents mdagents_vi mad_debate; do
   python -u -m runner.run_experiments --dataset data/vm14k_clean.jsonl --framework $fw \
-    --model sglang-gemma3-4b --workers 32
-done 2>&1 | tee -a ../logs/full_run_gemma3_4b.log
+    --model sglang-gemma3-4b-w4a16 --workers 32
+done 2>&1 | tee -a ../logs/full_run_gemma3_4b_w4a16.log
 ```
 
-Làm lại y hệt cho `sglang-medgemma-4b`, sau khi đổi server sang MedGemma ở bước 3.
-
 - **Ngắt / chạy tiếp:** Ctrl-C hai lần rồi chạy lại đúng lệnh cũ. Runner bỏ qua các câu đã có trong file.
-- **Không trộn model:** tên file kết quả chứa key model (`sglang-gemma3-4b`), nhưng runner **không**
-  kiểm tra server đang phục vụ model nào. Đổi model trên server thì phải chạy lại bước 5 trước.
+- **Không trộn model:** runner **không** kiểm tra server đang phục vụ model nào. Đổi model trên server
+  thì phải chạy lại bước 5 trước.
 - **Kiểm tra kết quả:** dùng skill `run-experiment` mục 4 (đủ n, `api_calls == n_llm_calls`,
   `n_usage_missing = 0`, không trùng id).
 
+### 7. (Làm sau) MedGemma-4B W4A16 — tự lượng tử hoá theo recipe RedHatAI
+
+```bash
+# 7a. Xin quyền tải google/medgemma-4b-it (repo bị khoá) tại https://huggingface.co/google/medgemma-4b-it,
+#     tạo token đọc, chỉ export trong shell:   export HF_TOKEN=hf_xxx
+# 7b. Môi trường lượng tử hoá riêng, máy có GPU ≥ 16 GB (không cần sm80; chạy được cả RTX 8000):
+conda create -n quant python=3.11 -y && conda activate quant
+pip install "llmcompressor>=0.6" datasets "transformers>=4.50" accelerate
+# 7c. Lượng tử hoá (~10–30 phút):
+python scripts/quantize_w4a16.py --model google/medgemma-4b-it --out ~/models/medgemma-4b-it-quantized.w4a16
+# 7d. Kiểm chứng recipe (nên làm): lượng tử hoá cả google/gemma-3-4b-it bằng script này, chạy pilot
+#     zero_shot rồi so với bản RedHatAI bằng scripts/compare_results.py. Agreement từng câu phải cao
+#     (~90 % trở lên); nếu không, recipe chưa lặp lại đúng.
+# 7e. Serve (GX10: thư mục model phải nằm trong ~/.cache/huggingface vì chỉ thư mục đó được mount vào container):
+cp -r ~/models/medgemma-4b-it-quantized.w4a16 ~/.cache/huggingface/local/
+MODEL=/root/.cache/huggingface/local/medgemma-4b-it-quantized.w4a16 PORT=30001 MEM_GB=12 \
+  EXTRA_ARGS="--served-model-name medgemma-4b-it-quantized.w4a16" bash scripts/serve_gx10.sh
+# 7f. Bước 5–6 như trên với --model sglang-medgemma-4b-w4a16
+```
+
+File `vimed_quantization.json` trong thư mục xuất ghi lại recipe, dữ liệu calibration và phiên bản
+thư viện. Dùng file này để khai trong Methods.
+
 ### Ghi chú cho Methods
 
+- **4-bit:** Gemma3 dùng bản W4A16 của RedHatAI; MedGemma tự lượng tử hoá **cùng recipe** (GPTQ, int4,
+  group 128, `actorder=weight`, `dampening 0.05`, calibration `neuralmagic/calibration` 512 mẫu × 2048
+  token). 32B/70B dùng **AWQ** int4. Tất cả đều là int4 lượng tử hoá trọng số, nhưng khác thuật toán.
+  Phải khai điểm này.
 - **Temperature** do code cố định theo framework (0,3; 0,5 cho CoT-SC; 0,0 cho critique). Các tham số
   sampling khác lấy theo `generation_config.json` của model (SGLang `sampling_defaults='model'`).
   Gemma 3 dùng `top_k=64, top_p=0.95`.
 - Gemma 3 **không có thinking**. Cờ `enable_thinking=False` mà code gửi bị bỏ qua, không ảnh hưởng.
 - Template Gemma 3 **không có vai `system`**: nó gộp system message vào lượt user đầu. Các prompt
   của repo luôn có dạng `[system, user]` hoặc `[user]` nên chạy được.
-- bf16, không lượng tử hoá, khác các model 32B/70B (4-bit). Nếu đổi sang 4-bit thì phải đổi **cả hai** model
-  4B và sửa `code/README.md` 3.3.1 + bảng "Ba điểm lệch" trong `CLAUDE.md`.
 
 ---
 

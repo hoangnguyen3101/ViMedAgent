@@ -132,14 +132,24 @@ MODELS: dict[str, dict] = {
     },
     "sglang-gemma3-4b": {
         "provider": "sglang",
-        # Đối chứng của MedGemma-4B: cùng nền Gemma 3 4B, cùng cỡ, KHÔNG tinh
-        # chỉnh y khoa → hiệu số MedGemma − Gemma3 là tác dụng riêng của y khoa hoá.
-        # Phải chạy CÙNG độ chính xác với sglang-medgemma-4b (mặc định bf16),
-        # không thì hiệu số lẫn cả ảnh hưởng của lượng tử hoá.
-        # Repo bị khoá (gated=manual): xin quyền tại
-        #   https://huggingface.co/google/gemma-3-4b-it  (có thể phải chờ duyệt).
-        # Hướng dẫn cài + chạy local: README.md mục "Gemma-3-4B / MedGemma-4B".
+        # bf16 gốc — KHÔNG phải bản dùng cho bảng (bảng dùng sglang-gemma3-4b-w4a16).
+        # Giữ lại để đo mức sụt do lượng tử hoá nếu cần. Repo gated=manual.
         "model_id": "google/gemma-3-4b-it",
+    },
+    "sglang-gemma3-4b-w4a16": {
+        "provider": "sglang",
+        # Bản dùng cho bảng: W4A16 (GPTQ int4, group 128, compressed-tensors) của RedHatAI,
+        # cùng hạng 4-bit với 32B/70B. Không bị khoá. Cần GPU sm>=80 (kernel Marlin).
+        # Đối chứng của MedGemma: hiệu số MedGemma − Gemma3 chỉ sạch khi MedGemma được
+        # lượng tử hoá ĐÚNG recipe này → scripts/quantize_w4a16.py.
+        # Hướng dẫn: README.md mục "Gemma-3-4B / MedGemma-4B".
+        "model_id": "RedHatAI/gemma-3-4b-it-quantized.w4a16",
+    },
+    "sglang-medgemma-4b-w4a16": {
+        "provider": "sglang",
+        # Chưa có — tạo bằng scripts/quantize_w4a16.py (cùng recipe RedHatAI ở trên),
+        # rồi serve với --served-model-name medgemma-4b-it-quantized.w4a16.
+        "model_id": "medgemma-4b-it-quantized.w4a16",
     },
 
     # ── Remote (LiteLLM proxy → SGLang trên GX10, qua Tailscale) ──
