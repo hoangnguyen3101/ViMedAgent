@@ -157,7 +157,7 @@ thiếu một là sập:
 |---|---|---|
 | 1 | Bản vá launcher `install_fp32_passthrough()` | SGLang `model_runner.py:906` ép fp16 **vô điều kiện** trên sm<80, nuốt luôn `--dtype float32`. Lý do nó ghi là "thiếu bf16" — đúng với bf16, nhưng sm75 chạy fp32 bình thường, nên đây là lỗi logic. Bản vá chỉ sửa đúng điều kiện đó; fp16/auto giữ nguyên hành vi. |
 | 2 | `DTYPE=float32` | Ở fp16, logits Gemma tràn số → softmax ra `NaN` → sampler assert `probability tensor contains either inf, nan or element < 0` → scheduler chết ngay lời gọi đầu. |
-| 3 | `ATTN_BACKEND=torch_native` | Ở fp32, kernel attention triton với `head_dim=256` cần 69.760 B shared memory, Turing chỉ có 65.536 B → `OutOfResources`. |
+| 3 | **Tách backend:** prefill `torch_native`, decode `triton` | Ở fp32, chỉ kernel triton **prefill** (`extend_attention_fwd`) với `head_dim=256` cần 69.760 B shared memory, Turing có 65.536 B → `OutOfResources`. Kernel triton **decode** vẫn chạy được, kèm CUDA graph. |
 
 Để chạy **4-bit** cần thêm:
 
@@ -173,7 +173,8 @@ không bị ảnh hưởng.
 
 ```bash
 # tmux gsrv
-MODEL=gaunernst/gemma-3-4b-it-int4-awq DTYPE=float32 ATTN_BACKEND=torch_native \
+MODEL=gaunernst/gemma-3-4b-it-int4-awq DTYPE=float32 ATTN_BACKEND=triton \
+EXTRA_ARGS='--prefill-attention-backend torch_native --decode-attention-backend triton' \
 MEM_FRACTION=0.35 MAX_RUNNING=32 CONTEXT_LEN=8192 \
   bash scripts/x86_cuda/serve_sglang.sh
 
@@ -184,9 +185,15 @@ bash scripts/wait_and_run.sh zero_shot sglang-gemma3-4b-awq 32
 Bộ nhớ đo được: fp32 gốc **16,14 GB**; AWQ 4-bit **6,14 GB** (bảng embedding 262k từ và tháp
 thị giác không lượng tử hoá, mà ở fp32 chúng to gấp đôi so với bf16).
 
+> **Đừng dùng `torch_native` cho decode.** `torch_native_backend.py:152` lặp Python qua **từng
+> request** (32 request × 34 lớp = 1.088 lời gọi attention riêng lẻ mỗi bước) và **không hỗ trợ
+> CUDA graph**. Đo trên `cot` ngày 13/10/2026: `torch_native` cả hai pha **77 tok/s**; tách
+> prefill/decode như trên **301,6 tok/s (×3,9)**, CUDA graph bật. Kết quả không đổi (accuracy
+> 31,0% → 31,1%).
+
 **Đã thử và KHÔNG được — đừng thử lại:** `--enable-fp32-lm-head`,
 `--triton-attention-reduce-in-fp32`, `DTYPE=bfloat16` (sm75 không có), `SGLANG_TURING_NO_JIT=1`,
-`--disable-cuda-graph`, `torch_native` ở fp16. Bản `RedHatAI/gemma-3-4b-it-quantized.w4a16`
+`--disable-cuda-graph`, `torch_native` ở fp16, `torch_native` cho decode (chạy được nhưng chậm ~4 lần). Bản `RedHatAI/gemma-3-4b-it-quantized.w4a16`
 (compressed-tensors) bị **chặn cứng**: `Min capability: 80. Current capability: 75` — không bản vá
 nào qua được, chỉ chạy trên GPU ≥ sm80 (GX10).
 
@@ -210,10 +217,12 @@ p = 0,043.
 - **Chưa có MedGemma 4-bit.** Không có bản AWQ MedGemma nào trên HF, và recipe AWQ của
   `gaunernst` không công bố. Để cặp đối chứng 4-bit công bằng phải **tự lượng tử hoá cả hai**
   bằng cùng một recipe. Hiện chỉ so được ở fp32.
-- **Framework sinh dài rất chậm.** fp32 không dùng được tensor core fp16 của Turing, và
-  `torch_native` không có kernel hợp nhất. `zero_shot` (3 token ra) chạy ~36 phút/seed, nhưng
-  `cot` (tới 512 token ra) đo được **~5,5 câu/phút** → cỡ **4 ngày** cho 3 seed. Các framework
-  sinh dài nên chạy trên GX10.
+- **`cot` bị cắt cụt.** **37,1%** câu trả lời `cot` của Gemma chạm trần `MAX_TOKENS_LONG=512`, và
+  **98,7%** số câu parse hỏng (9,3%) là câu bị cắt **trước khi kịp nói đáp án** → chấm là sai. Không
+  nâng trần riêng cho Gemma (trần dùng chung mọi model, đổi là mất so sánh); cần đo tỉ lệ cắt ở các
+  model khác và **khai trong Methods** nếu Gemma bị thiệt.
+- **Tốc độ.** Với cấu hình tách backend, `cot` chạy ~38 câu/phút (~11 giờ cho 3 seed). fp32 vẫn
+  không dùng được tensor core fp16 của Turing, nên chậm hơn GX10.
 
 ### 3.4. Tham số suy luận (Inference settings)
 
