@@ -407,7 +407,7 @@ def main():
         help="Single framework to run (ignored when --all is set)",
     )
     parser.add_argument(
-        "--model", default="llama-3.1-8b",
+        "--model", default="sglang-qwen3-32b",
         choices=MODEL_NAMES,
         help="Single model to run (ignored when --all is set)",
     )

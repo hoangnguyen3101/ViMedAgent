@@ -1,371 +1,385 @@
-# ViMedAgent v2 — cùng benchmark, backend SGLang
+# ViMedAgent v2 — SGLang backend
 
-> Bản sao của `ViMedAgent` (v1, backend Ollama) với **một thay đổi duy nhất ở tầng hạ tầng**: thêm
-> provider **SGLang** (https://github.com/sgl-project/sglang) để chạy inference nhanh hơn nhờ
-> *continuous batching* + *RadixAttention prefix cache*. Toàn bộ framework, prompt, seed, định dạng kết quả,
-> metric **giữ nguyên** — kết quả v2 so sánh trực tiếp được với v1.
+ViMedAgent benchmarks single-LLM prompting against multi-agent systems on Vietnamese medical
+multiple-choice questions (VM14K, 11,094 questions). **v2** is identical to v1 in every framework,
+prompt, seed, result format and metric — it only adds an **SGLang** inference backend
+(continuous batching + RadixAttention prefix cache), so v2 results compare directly with v1.
+
+- Benchmark, frameworks and metrics in detail: [`code/README.md`](code/README.md)
+- Backend setup and validation log: [`code/experiment/007-sglang-backend-setup/README.md`](code/experiment/007-sglang-backend-setup/README.md)
+
+All commands below run from `code/` unless stated otherwise.
+
+---
+
+## 1. Requirements
+
+| | |
+|---|---|
+| OS | Linux |
+| GPU | NVIDIA, driver ≥ 525. Compute capability ≥ 7.5 (Turing or newer) |
+| Python | conda, or Python ≥ 3.10 |
+| Disk | 4–40 GB per model (see §3), plus up to ~300 MB of results per model × framework (3 seeds; `mad_debate` is the largest) |
+| Hugging Face | an account and a read token, for the gated models in §3 |
+
+One SGLang server serves **one model**. The experiment runner is a separate, lightweight
+HTTP client and can run on the same machine or another one.
+
+---
+
+## 2. Install
+
+### 2.1 Client (the experiment runner)
+
+```bash
+git clone https://github.com/hoangnguyen3101/ViMedAgent.git
+cd ViMedAgent/code
+pip install -r requirements-client.txt       # openai, scipy, numpy — no torch needed
+```
+
+### 2.2 SGLang server
+
+**Standard path — Linux x86_64 + NVIDIA GPU:**
+
+```bash
+bash scripts/x86_cuda/install_sglang.sh      # creates conda env "sglang" with sglang[all]
+```
+
+Tested with **SGLang 0.5.9**. The script installs into its own env, so it does not touch the
+client environment.
+
+> **GPUs older than Ampere (compute capability < 8.0, e.g. Turing / Quadro RTX 8000 / T4).**
+> The `sgl-kernel` wheels contain no code for these GPUs. `serve_sglang.sh` detects this and starts
+> the server through `scripts/x86_cuda/sglang_turing_launch.py`, which swaps in JIT, Triton and
+> PyTorch fallbacks. Nothing to configure, but it needs a CUDA toolkit ≥ 12 with `nvcc` and
+> g++ ≥ 10 (the installer adds GCC 13 to the env). Check the fallbacks before serving:
 >
-> Tài liệu benchmark/framework/metric đầy đủ: [`code/README.md`](code/README.md).
-> Log setup + kiểm chứng: [`code/experiment/007-sglang-backend-setup/README.md`](code/experiment/007-sglang-backend-setup/README.md).
+> ```bash
+> conda run -n sglang python scripts/x86_cuda/sglang_turing_probe.py
+> ```
+
+**aarch64 + Blackwell (NVIDIA DGX Spark / ASUS Ascent GX10, GB10):** PyPI wheels do not apply
+(no `sm_121` code). Use the pre-built container instead:
+
+```bash
+bash scripts/install_gx10.sh                 # client deps + docker pull + model pre-download
+```
+
+A native (no-Docker) install for GB10 is in the [appendix](#appendix--gb10-native-install-no-docker).
 
 ---
 
-## Cài trên ASUS Ascent GX10 (NVIDIA GB10) — đích triển khai
+## 3. Download models
 
-Code đã nằm sẵn trên máy, ví dụ `/home/vkist/Datnh/ViMedAgentv2`. **Một lệnh cài:**
+Each `--model` key in [`infrastructure/config.py`](code/infrastructure/config.py) maps to one
+Hugging Face repo. The server must serve **exactly** that repo id.
+
+| `--model` key | Hugging Face repo | Weights | Gated |
+|---|---|---|---|
+| `sglang-qwen3-32b` | `Qwen/Qwen3-32B-AWQ` | ~19 GB, AWQ int4 | no |
+| `sglang-llama3.3-70b` | `casperhansen/llama-3.3-70b-instruct-awq` | ~40 GB, AWQ int4 | no |
+| `sglang-qwen3-14b` | `Qwen/Qwen3-14B` | ≈ 30 GB, bf16 | no |
+| `sglang-llama3.1-8b` | `meta-llama/Llama-3.1-8B-Instruct` | ≈ 16 GB, bf16 | **yes** |
+| `sglang-deepseek-r1-14b` | `deepseek-ai/DeepSeek-R1-Distill-Qwen-14B` | ≈ 30 GB, bf16 | no |
+| `sglang-gemma3-4b-awq` | `gaunernst/gemma-3-4b-it-int4-awq` | 3.8 GB, AWQ int4 | no |
+| `sglang-gemma3-4b-w4a16` | `RedHatAI/gemma-3-4b-it-quantized.w4a16` | ~4.8 GB, W4A16 | no — **needs GPU ≥ 8.0** |
+| `sglang-gemma3-4b` | `google/gemma-3-4b-it` | 8.0 GB, bf16 | **yes** (manual) |
+| `sglang-medgemma-4b` | `google/medgemma-4b-it` | 8.0 GB, bf16 | **yes** (auto) |
+| `sglang-medgemma-4b-w4a16` | self-quantized, see §8 | ~4 GB, W4A16 | — |
+
+For gated repos, accept the license on the model's Hugging Face page first, then:
 
 ```bash
-cd /home/vkist/Datnh/ViMedAgentv2/code
-bash scripts/install_gx10.sh
+hf auth login                                # or: export HF_TOKEN=hf_...
+hf download Qwen/Qwen3-32B-AWQ               # repeat for each model you need
 ```
 
-Lệnh này (chạy lại được, không phá gì): kiểm tra aarch64 + docker + nvidia runtime → `pip install`
-client (`openai`, `scipy` — runner chỉ gọi HTTP, không cần torch) → `docker pull`
-`scitrera/dgx-spark-sglang:0.5.17` (image dựng sẵn cho GB10: CUDA 13 + sgl-kernel cho sm_121) → tải
-trước `Qwen/Qwen3-32B-AWQ` (~19GB) vào `~/.cache/huggingface`.
+On GB10, download through the container instead: `MODEL=<repo> bash scripts/install_gx10.sh`.
 
-Chạy server và thí nghiệm:
+> Never put a token in a file inside the repo. `.gitignore` already blocks `.env`, `*.key`, `*.pem`.
+
+---
+
+## 4. Start the server
+
+Run it in `tmux` — it stays in the foreground.
 
 ```bash
 tmux new -s sglang
-bash scripts/serve_gx10.sh                    # Qwen/Qwen3-32B-AWQ, port 30000, ctx 8192, ~27GB, 32 request song song
-
-# cửa sổ khác
-python scripts/sglang_smoke_test.py --model sglang-qwen3-32b
-python -m runner.run_experiments --dataset data/pilot_100.jsonl --framework zero_shot --model sglang-qwen3-32b
-python scripts/compare_results.py --framework zero_shot --dataset pilot_100 --a ollama2-qwen3-32b --b sglang-qwen3-32b
-# nếu Pass@1 ~60–62 % và null=0 → backend đúng (cùng model đã đo trên RTX 8000: 61,33 %), chạy full:
-python -m runner.run_experiments --dataset data/vm14k_clean.jsonl --framework self_refine --model sglang-qwen3-32b
+MODEL=Qwen/Qwen3-32B-AWQ MEM_FRACTION=0.65 bash scripts/x86_cuda/serve_sglang.sh
 ```
 
-Chỉ có **một** model Qwen3-32B trong `config.py`: `sglang-qwen3-32b` ↔ `Qwen/Qwen3-32B-AWQ` (int4, cùng
-hạng 4-bit với `qwen3:32b` Q4_K_M của Ollama nên bảng v2 so thẳng được với bảng v1). Cố ý không thêm FP8/bf16:
-chênh lệch giữa các kiểu lượng tử hoá (vài điểm phần trăm) có thể lớn bằng chênh lệch giữa các framework đang đo.
+Wait for `The server is fired up and ready to roll!`, then detach with `Ctrl-b d`.
 
-**Llama-3.3-70B** (đã có trong `config.py`: `sglang-llama3.3-70b` ↔ `casperhansen/llama-3.3-70b-instruct-awq`, int4
-AWQ 40GB, cùng hạng 4-bit với `llama3.3-70b-ctx4k` của v1). Weights 40GB nên phải nâng `MEM_GB`; mỗi server một model,
-dừng server Qwen (Ctrl-C trong tmux `sglang`) trước khi chạy:
+**Options** (environment variables, all optional):
 
-```bash
-MODEL=casperhansen/llama-3.3-70b-instruct-awq bash scripts/install_gx10.sh            # tải 40GB một lần
-MODEL=casperhansen/llama-3.3-70b-instruct-awq MEM_GB=50 bash scripts/serve_gx10.sh    # 40GB weights + ~10GB KV
-python scripts/sglang_smoke_test.py --model sglang-llama3.3-70b
-python -m runner.run_experiments --dataset data/pilot_100.jsonl --framework zero_shot --model sglang-llama3.3-70b
-python scripts/compare_results.py --framework zero_shot --dataset pilot_100 --a ollama-llama3.3-70b --b sglang-llama3.3-70b
-```
-
-(Llama không có thinking nên `enable_thinking` bị bỏ qua, không ảnh hưởng. v1 chạy 70B với ctx 4k vì thiếu VRAM; ở đây
-để 8192 như mọi model khác.)
-
-Biến môi trường của `serve_gx10.sh` (tuỳ chọn): `IMAGE` (mặc định `scitrera/dgx-spark-sglang:0.5.17`,
-dự phòng `0.5.9-t4` là bản forum đã test), `PORT` (30000), `CONTEXT_LEN` (**8192**, giống tag `*-ctx8k` của v1),
-`MEM_GB` (**27** mặc định = weights 18GB + KV ~7GB ≈ 29k token, giống lần kiểm chứng; tăng vd `MEM_GB=60` nếu muốn KV lớn hơn), `MEM_FRACTION` (dùng thay `MEM_GB` khi để `MEM_GB=` rỗng), `MAX_RUNNING` (32, tăng cùng `MEM_GB`), `ATTN_BACKEND` (triton),
-`HF_CACHE`, `HF_TOKEN` (cần cho `meta-llama/*`).
-
-**Kỳ vọng tốc độ trên GB10** (chưa đo): decode bị giới hạn băng thông 273 GB/s; với weights int4 18GB và
-kernel AWQ-Marlin của image GB10, ước ~15 token/s mỗi sequence, 32 sequence song song → vài trăm token/s,
-so với 90 token/s đo trên RTX 8000 (không có kernel int4, phải giải nén mỗi bước). Prefill không phải nút thắt.
-
-Lưu ý GX10: không dùng `scripts/x86_cuda/install_sglang.sh` ở đây (wheel PyPI không có mã cho sm_121;
-script đó tự dừng khi thấy aarch64). Cần cài native không Docker → công thức forum NVIDIA ở cuối file.
-
----
-
-### Cài lại từ đầu trên GX10 (dọn sạch trạng thái cũ)
-
-```bash
-# 0. dừng server đang chạy
-tmux attach -t sglang      # Ctrl-C; nếu container không thoát: docker ps → docker stop <id>
-tmux kill-session -t sglang
-
-# 1. dọn dấu vết của các lần cài trước
-conda env remove -n sglang -y 2>/dev/null          # env x86 cài nhầm (nếu có)
-sudo rm -rf ~/.cache/huggingface/hub/models--Qwen--Qwen3-32B-FP8 ~/.cache/huggingface/hub/.locks/models--Qwen--Qwen3-32B-FP8
-sudo chown -R "$(id -u):$(id -g)" ~/.cache/huggingface   # file do container root tạo
-cd /home/vkist/Datnh/ViMedAgentv2/code
-rm -f scripts/install_sglang.sh scripts/serve_sglang.sh scripts/serve_sglang_docker.sh \
-      scripts/sglang_turing_launch.py scripts/sglang_turing_probe.py scripts/sglang_awq_gemm_bench.py
-rm -rf results_test/tier*/*/*__sglang-qwen3-32b-fp8__*                 # kết quả FP8 thử nghiệm (nếu có)
-
-# 2. cập nhật code (tarball từ máy hoangnv) rồi cài
-cd /home/vkist/Datnh/ViMedAgentv2 && tar xzf ../ViMedAgentv2_update_2026-09-11.tar.gz && cd code
-bash scripts/install_gx10.sh                        # client deps + docker pull + tải Qwen3-32B-AWQ (bỏ qua nếu đã có)
-
-# 3. serve (tmux) — kiểm tra dòng đầu: "MEM_GB=27 of ~117000MiB → mem_fraction=0.23"
-tmux new -s sglang
-bash scripts/serve_gx10.sh                           # chờ "The server is fired up and ready to roll!"; Ctrl-b d để tách
-#   nếu dòng đầu báo WARNING không đọc được bộ nhớ:  MEM_GB= MEM_FRACTION=0.23 bash scripts/serve_gx10.sh
-
-# 4. kiểm chứng (~2 phút)
-python scripts/sglang_smoke_test.py --model sglang-qwen3-32b
-python -m runner.run_experiments --dataset data/pilot_100.jsonl --framework zero_shot --model sglang-qwen3-32b
-python scripts/compare_results.py --framework zero_shot --dataset pilot_100 --a ollama2-qwen3-32b --b sglang-qwen3-32b
-#   đạt: OK + has_think_tag=False + null=0; Pass@1 ~60–62 % (RTX 8000 cùng model: 61,33 %)
-
-# 5. chạy full qua đêm (tmux riêng, resume được — Ctrl-C ×2 rồi chạy lại cùng lệnh để tiếp)
-tmux new -s vimed
-cd /home/vkist/Datnh/ViMedAgentv2/code && mkdir -p ../logs
-for fw in zero_shot cot cot_sc self_refine voting_ensemble medagents medagents_vi mdagents mdagents_vi mad_debate; do
-  python -m runner.run_experiments --dataset data/vm14k_clean.jsonl --framework $fw --model sglang-qwen3-32b
-done 2>&1 | tee -a ../logs/full_run_gx10.log
-```
-
-Sáng hôm sau: `tail -50 ../logs/full_run_gx10.log` (bảng `FINAL`/`Overall` từng framework),
-`ls results/tier*/*/ | grep sglang`, và `python scripts/compare_results.py --framework <fw> --dataset vm14k_clean --a ollama2-qwen3-32b --b sglang-qwen3-32b`
-cho framework nào v1 đã có đủ 3 seed (`self_refine` sắp xong bên máy hoangnv).
-
-Nếu `pip` trong `base` (python 3.14) không cài được `scipy`: `conda create -n vimed python=3.11 -y && conda activate vimed && pip install -r requirements-client.txt`, rồi chạy runner trong env đó.
-
-## Chạy thí nghiệm (mọi máy)
-
-Giống hệt v1, chỉ đổi tên model sang `sglang-*`:
-
-```bash
-# toàn bộ 10 framework cho 1 model (tuần tự, resume được, Ctrl-C an toàn)
-for fw in zero_shot cot cot_sc self_refine voting_ensemble medagents medagents_vi mdagents mdagents_vi mad_debate; do
-  python -m runner.run_experiments --dataset data/vm14k_clean.jsonl --framework $fw --model sglang-qwen3-32b
-done
-```
-
-Kết quả vào `results/tier{N}/<framework>/<framework>__<model>__<dataset>__s<seed>.jsonl` — tên model khác v1
-(`ollama2-qwen3-32b`) nên không ghi đè file cũ. `--workers` (hoặc `VIMED_NUM_WORKERS`) là số request đồng thời;
-mặc định 32 cho provider sglang. `SGLANG_BASE_URL` (mặc định `http://127.0.0.1:30000/v1`) nếu server ở host/port khác.
-
-So sánh 2 backend trên cùng framework/dataset: `python scripts/compare_results.py --framework <fw> --dataset <stem> --a <modelA> --b <modelB>`.
-
----
-
-## Gemma-3-4B / MedGemma-4B (4-bit) — cài SGLang và chạy local (không gọi API)
-
-Hai model 4B chạy **trên chính máy có GPU**: runner và server SGLang cùng một máy, runner gọi
-`http://127.0.0.1:<port>`. Không qua LiteLLM, không qua Tailscale, nên không bị lỗi mạng như khi gọi
-server từ xa.
-
-| Key `--model` | Weights | Trạng thái |
+| Variable | Default | Meaning |
 |---|---|---|
-| `sglang-gemma3-4b-w4a16` | [`RedHatAI/gemma-3-4b-it-quantized.w4a16`](https://huggingface.co/RedHatAI/gemma-3-4b-it-quantized.w4a16) | **dùng ngay** (tải từ HF, không bị khoá) |
-| `sglang-medgemma-4b-w4a16` | `medgemma-4b-it-quantized.w4a16`, **tự lượng tử hoá** bằng `scripts/quantize_w4a16.py` | làm sau (xem cuối mục) |
+| `MODEL` | `Qwen/Qwen3-32B-AWQ` | Hugging Face repo id or local path |
+| `PORT` | `30000` | the runner reaches it at `http://127.0.0.1:$PORT/v1` |
+| `MEM_FRACTION` | `0.85` | share of **total** GPU memory for weights + KV cache. Lower it on a shared GPU |
+| `MAX_RUNNING` | `64` | max sequences batched together |
+| `CONTEXT_LEN` | `8192` | context window, same for every model |
+| `DTYPE` | `auto` | `auto` = fp16 below compute capability 8.0, bf16 otherwise |
+| `ATTN_BACKEND` | `auto` | `auto` = triton below 8.0 |
+| `EXTRA_ARGS` | — | passed unchanged to `sglang.launch_server` |
 
-Cả hai là **W4A16**: GPTQ int4 theo nhóm 128, định dạng compressed-tensors. Các model 32B/70B cũng
-4-bit (AWQ). Hiệu số MedGemma − Gemma3 là tác dụng riêng của tinh chỉnh y khoa, **nên hai model phải
-lượng tử hoá cùng một cách**: MedGemma được tạo bằng **đúng recipe RedHatAI đã dùng** cho Gemma3 (cùng
-`recipe.yaml`, cùng dữ liệu calibration). Không dùng bản MedGemma 4-bit có sẵn trên HF, vì không bản nào làm
-theo recipe này.
+Pick `MEM_FRACTION` from the memory a model needs: `MEM_FRACTION ≈ needed_GB / card_GB`.
 
-### 0. Yêu cầu
+### Per-model recipes
 
-- **GPU Ampere trở lên (sm ≥ 80), ≥ 12 GB VRAM trống.** Kernel W4A16 (Marlin) của SGLang cần sm ≥ 80.
-  Trọng số khoảng 3 GB (int4) + khoảng 0,8 GB tháp thị giác (giữ bf16, không dùng tới), còn lại là KV cache.
-  **GX10 chạy được.** Quadro RTX 8000 (Turing sm75) và máy `ailab` (GTX 1650) **không chạy được**.
-- **Client:** `openai`, `scipy` (`pip install -r code/requirements-client.txt`, hoặc dùng env `medagent`).
-
-### 1. Cài SGLang
-
+**Qwen3-32B-AWQ** — needs ~28 GB (19 GB weights + KV):
 ```bash
-cd ViMedAgent/code
-
-# ASUS GX10 / DGX Spark (GB10): docker image dựng sẵn. KHÔNG dùng install_sglang.sh
-bash scripts/install_gx10.sh
-
-# Máy x86 + GPU Ampere trở lên (A100, A6000, RTX 30xx/40xx...): conda env "sglang"
-bash scripts/x86_cuda/install_sglang.sh
+MODEL=Qwen/Qwen3-32B-AWQ MEM_FRACTION=0.65 MAX_RUNNING=32 bash scripts/x86_cuda/serve_sglang.sh
 ```
 
-### 2. Tải model (một lần)
+**Llama-3.3-70B-AWQ** — needs ~50–60 GB, so a single 48 GB card is not enough once anything
+else holds memory. Use a larger GPU or GB10.
 
+**Gemma 3 / MedGemma 4B** — see §4.1 if your GPU is older than Ampere. On compute capability
+≥ 8.0, the defaults work:
 ```bash
-# GX10 (tải bằng container, file thuộc user hiện tại):
-MODEL=RedHatAI/gemma-3-4b-it-quantized.w4a16 bash scripts/install_gx10.sh
-# x86 (env sglang):
-conda run -n sglang huggingface-cli download RedHatAI/gemma-3-4b-it-quantized.w4a16
+MODEL=RedHatAI/gemma-3-4b-it-quantized.w4a16 MEM_FRACTION=0.35 bash scripts/x86_cuda/serve_sglang.sh
 ```
 
-### 3. Chạy server (trong tmux, server chạy foreground)
+**On GB10** use `serve_gx10.sh`, where memory is an absolute `MEM_GB` instead of a fraction:
+```bash
+MODEL=Qwen/Qwen3-32B-AWQ MEM_GB=27 bash scripts/serve_gx10.sh
+MODEL=casperhansen/llama-3.3-70b-instruct-awq MEM_GB=60 bash scripts/serve_gx10.sh
+```
 
-Mỗi server chỉ phục vụ **một** model. Dùng cổng **30001** để không đụng server 30000 đang chạy.
+### 4.1 Gemma 3 on GPUs older than Ampere (compute capability < 8.0)
+
+Gemma 3 is designed for **bf16**, which these GPUs do not have. Three things are required
+**together**; with any one missing, the server crashes on the first request:
 
 ```bash
-tmux new -s gemma
-cd ViMedAgent/code
-
-# GX10 (MEM_GB là số GB tuyệt đối):
-MODEL=RedHatAI/gemma-3-4b-it-quantized.w4a16 PORT=30001 MEM_GB=12 CONTEXT_LEN=8192 \
-  bash scripts/serve_gx10.sh
-
-# x86 (MEM_FRACTION là tỉ lệ VRAM của cả card; chọn để được ~12 GB, vd card 24 GB → 0.5):
-MODEL=RedHatAI/gemma-3-4b-it-quantized.w4a16 PORT=30001 MEM_FRACTION=0.5 MAX_RUNNING=32 CONTEXT_LEN=8192 \
+MODEL=gaunernst/gemma-3-4b-it-int4-awq \
+DTYPE=float32 ATTN_BACKEND=triton \
+EXTRA_ARGS='--prefill-attention-backend torch_native --decode-attention-backend triton' \
+MEM_FRACTION=0.35 MAX_RUNNING=32 \
   bash scripts/x86_cuda/serve_sglang.sh
 ```
 
-Chờ dòng `The server is fired up and ready to roll!`, rồi tách khỏi tmux bằng `Ctrl-b d`. Trong log lúc
-khởi động phải có `compressed-tensors` hoặc `marlin`. Nếu thấy lỗi kernel thì GPU không đủ sm ≥ 80.
+| | Why |
+|---|---|
+| `DTYPE=float32` | In fp16 Gemma's logits overflow → softmax produces `NaN` → the sampler asserts and the scheduler dies. fp32 is the only dtype both supported and wide enough |
+| prefill `torch_native` | In fp32, Triton's prefill kernel needs 69,760 B of shared memory with Gemma's `head_dim=256`; these GPUs have 65,536 B |
+| decode `triton` | Do **not** use `torch_native` for decode: it loops over every request in Python and has no CUDA-graph support — ~4× slower (77 vs 301.6 tok/s measured) |
 
-⚠️ **Trên GX10 khi server 70B (cổng 30000) đang chạy:** 70B đã giữ khoảng 85 GB, thêm 12 GB vẫn vừa
-128 GB. Nhưng hai server dùng chung một GPU nên **cả hai cùng chậm đi**. Nên chạy Gemma khi 70B
-không có job.
+The launcher also applies two runtime patches automatically (they only take effect when
+`float32` is requested explicitly, so fp16 runs of other models are unaffected):
 
-### 4. Trỏ runner vào server local
+- SGLang 0.5.9 forces fp16 on every GPU below 8.0, even when `--dtype float32` is passed —
+  the stated reason is missing bf16 support, but fp32 is fully supported. The patch keeps an
+  explicit `float32`.
+- SGLang's AWQ only allows fp16 activations. The compute path is already dtype-generic, so the
+  patch allows fp32 → **W4A32**: 4-bit weights, fp32 matmul. Uses 6.1 GB.
 
-```bash
-cd ViMedAgent/code
-export SGLANG_BASE_URL=http://127.0.0.1:30001/v1
-```
+`RedHatAI/gemma-3-4b-it-quantized.w4a16` **cannot** run on these GPUs: compressed-tensors refuses
+to load below compute capability 8.0. Use `gaunernst/gemma-3-4b-it-int4-awq` instead.
 
-`model_id` trong `config.py` phải trùng **chính xác** với tên server phục vụ. Mặc định tên này là giá trị
-`MODEL=`, tức `RedHatAI/gemma-3-4b-it-quantized.w4a16`. Bước 5 kiểm tra điều này.
+### 4.2 Remote server through a LiteLLM proxy (optional)
 
-### 5. Kiểm tra trước khi chạy
-
-```bash
-python scripts/sglang_smoke_test.py --model sglang-gemma3-4b-w4a16
-#   đạt: [1] server phục vụ RedHatAI/gemma-3-4b-it-quantized.w4a16, [2] has_think_tag=False,
-#        [3] trả 1 ký tự A–D, [4] null=0
-
-python -m runner.run_experiments --dataset data/pilot_100.jsonl --framework zero_shot --model sglang-gemma3-4b-w4a16
-#   ghi vào results_test/. Nếu null > 0 hoặc đáp án lệch hẳn về một chữ cái thì dừng lại kiểm tra,
-#   đừng chạy full
-```
-
-### 6. Chạy full (tmux riêng, resume được)
+The `litellm-*` keys call a model served on another machine through a LiteLLM proxy instead of a
+local SGLang server:
 
 ```bash
-tmux new -s run-gemma
-cd ViMedAgent/code && export SGLANG_BASE_URL=http://127.0.0.1:30001/v1 && mkdir -p ../logs
-for fw in zero_shot cot cot_sc self_refine voting_ensemble medagents medagents_vi mdagents mdagents_vi mad_debate; do
-  python -u -m runner.run_experiments --dataset data/vm14k_clean.jsonl --framework $fw \
-    --model sglang-gemma3-4b-w4a16 --workers 32
-done 2>&1 | tee -a ../logs/full_run_gemma3_4b_w4a16.log
+export LITELLM_BASE_URL=http://<proxy-host>:<port>/v1
+export LITELLM_API_KEY=<key>
+python scripts/litellm_smoke_test.py --model litellm-qwen2.5-72b   # check before every batch of runs
 ```
 
-- **Ngắt / chạy tiếp:** Ctrl-C hai lần rồi chạy lại đúng lệnh cũ. Runner bỏ qua các câu đã có trong file.
-- **Không trộn model:** runner **không** kiểm tra server đang phục vụ model nào. Đổi model trên server
-  thì phải chạy lại bước 5 trước.
-- **Kiểm tra kết quả:** dùng skill `run-experiment` mục 4 (đủ n, `api_calls == n_llm_calls`,
-  `n_usage_missing = 0`, không trùng id).
-
-### 7. (Làm sau) MedGemma-4B W4A16 — tự lượng tử hoá theo recipe RedHatAI
-
-```bash
-# 7a. Xin quyền tải google/medgemma-4b-it (repo bị khoá) tại https://huggingface.co/google/medgemma-4b-it,
-#     tạo token đọc, chỉ export trong shell:   export HF_TOKEN=hf_xxx
-# 7b. Môi trường lượng tử hoá riêng, máy có GPU ≥ 16 GB (không cần sm80; chạy được cả RTX 8000):
-conda create -n quant python=3.11 -y && conda activate quant
-pip install "llmcompressor>=0.6" datasets "transformers>=4.50" accelerate
-# 7c. Lượng tử hoá (~10–30 phút):
-python scripts/quantize_w4a16.py --model google/medgemma-4b-it --out ~/models/medgemma-4b-it-quantized.w4a16
-# 7d. Kiểm chứng recipe (nên làm): lượng tử hoá cả google/gemma-3-4b-it bằng script này, chạy pilot
-#     zero_shot rồi so với bản RedHatAI bằng scripts/compare_results.py. Agreement từng câu phải cao
-#     (~90 % trở lên); nếu không, recipe chưa lặp lại đúng.
-# 7e. Serve (GX10: thư mục model phải nằm trong ~/.cache/huggingface vì chỉ thư mục đó được mount vào container):
-cp -r ~/models/medgemma-4b-it-quantized.w4a16 ~/.cache/huggingface/local/
-MODEL=/root/.cache/huggingface/local/medgemma-4b-it-quantized.w4a16 PORT=30001 MEM_GB=12 \
-  EXTRA_ARGS="--served-model-name medgemma-4b-it-quantized.w4a16" bash scripts/serve_gx10.sh
-# 7f. Bước 5–6 như trên với --model sglang-medgemma-4b-w4a16
-```
-
-File `vimed_quantization.json` trong thư mục xuất ghi lại recipe, dữ liệu calibration và phiên bản
-thư viện. Dùng file này để khai trong Methods.
-
-### Ghi chú cho Methods
-
-- **4-bit:** Gemma3 dùng bản W4A16 của RedHatAI; MedGemma tự lượng tử hoá **cùng recipe** (GPTQ, int4,
-  group 128, `actorder=weight`, `dampening 0.05`, calibration `neuralmagic/calibration` 512 mẫu × 2048
-  token). 32B/70B dùng **AWQ** int4. Tất cả đều là int4 lượng tử hoá trọng số, nhưng khác thuật toán.
-  Phải khai điểm này.
-- **Temperature** do code cố định theo framework (0,3; 0,5 cho CoT-SC; 0,0 cho critique). Các tham số
-  sampling khác lấy theo `generation_config.json` của model (SGLang `sampling_defaults='model'`).
-  Gemma 3 dùng `top_k=64, top_p=0.95`.
-- Gemma 3 **không có thinking**. Cờ `enable_thinking=False` mà code gửi bị bỏ qua, không ảnh hưởng.
-- Template Gemma 3 **không có vai `system`**: nó gộp system message vào lượt user đầu. Các prompt
-  của repo luôn có dạng `[system, user]` hoặc `[user]` nên chạy được.
+The `model_id` of a `litellm-*` key must match the `model_name` in the proxy's `config.yaml`
+exactly.
 
 ---
 
-## Vì sao đổi backend
+## 5. Run experiments
+
+Point the runner at the server and check it before running anything long:
+
+```bash
+export SGLANG_BASE_URL=http://127.0.0.1:30000/v1
+python scripts/sglang_smoke_test.py --model sglang-qwen3-32b
+```
+
+### One framework
+
+```bash
+# quick check on 100 questions — writes to results_test/
+python -m runner.run_experiments --dataset data/pilot_100.jsonl  --framework zero_shot --model sglang-qwen3-32b
+
+# full benchmark, 11,094 questions × 3 seeds — writes to results/
+python -m runner.run_experiments --dataset data/vm14k_clean.jsonl --framework zero_shot --model sglang-qwen3-32b
+```
+
+### All ten frameworks
+
+| Tier | Framework | LLM calls / question |
+|---|---|---|
+| 1 — single LLM | `zero_shot` | 1 |
+| | `cot` | 1 |
+| | `cot_sc` | 5 |
+| | `self_refine` | 2–5 (stops early) |
+| 2 — ensemble | `voting_ensemble` | 3 |
+| 3 — multi-agent | `medagents` | 9 |
+| | `medagents_vi` | 8 |
+| | `mdagents` | 2 / 4 / 7 (by routed difficulty) |
+| | `mdagents_vi` | 1 / 3 / 6 (difficulty read from the dataset) |
+| | `mad_debate` | ≤ 9 (stops on consensus) |
+
+```bash
+mkdir -p ../logs
+for fw in zero_shot cot cot_sc self_refine voting_ensemble medagents medagents_vi mdagents mdagents_vi mad_debate; do
+  PYTHONUNBUFFERED=1 python -m runner.run_experiments \
+    --dataset data/vm14k_clean.jsonl --framework $fw --model sglang-qwen3-32b
+done 2>&1 | tee -a ../logs/full_run.log
+```
+
+Or let a script wait for the server and then start one framework — useful after a reboot or a
+model swap:
+
+```bash
+bash scripts/wait_and_run.sh <framework> <model-key> <workers>
+# e.g.  bash scripts/wait_and_run.sh cot sglang-qwen3-32b 32
+```
+
+### Runner options
+
+| Option | Meaning |
+|---|---|
+| `--workers N` | concurrent requests. Default 32 for SGLang. Keep it ≤ the server's `MAX_RUNNING` |
+| `--no-resume` | ignore existing results and start over |
+| `--all` | every framework × every model in `config.py` (rarely what you want) |
+
+| Environment variable | Meaning |
+|---|---|
+| `SGLANG_BASE_URL` | server address, default `http://127.0.0.1:30000/v1` |
+| `VIMED_REQUEST_TIMEOUT` | seconds per request, default 300. Raise it (e.g. 900) when the GPU is shared |
+| `VIMED_NUM_WORKERS` | default for `--workers` |
+| `PYTHONUNBUFFERED=1` | without it, progress lines piped to `tee` sit in an 8 KB buffer and can be lost |
+
+### Resuming and stopping
+
+- **Resume** — re-run the same command. Results are appended per question, and finished
+  questions are skipped.
+- **Stop** — the runner catches the first `Ctrl-C` of a seed and moves on to the next seed. To stop
+  the whole run, press `Ctrl-C` until the prompt returns (once per remaining seed), or `kill` the
+  process. Nothing already written is lost.
+- **Do not swap the model on a running server.** The runner does not check which model the server
+  is serving. Stop the job first, change the server, run the smoke test again.
+
+### Output
+
+```
+results/tier{1,2,3}/<framework>/<framework>__<model>__<dataset>__s<seed>.jsonl
+results/tier{1,2,3}/<framework>/<framework>__<model>__<dataset>__s<seed>.jsonl.meta.json
+```
+
+Datasets whose name starts with `pilot` go to `results_test/` instead. Each `.meta.json` records the
+run configuration (model id, provider, temperature, token limits, host, and every restart).
+
+---
+
+## 6. Check results
+
+After each run:
+
+```bash
+python - results/tier1/zero_shot/zero_shot__sglang-qwen3-32b__vm14k_clean__s42.jsonl <<'PY'
+import json, sys
+rows = [json.loads(l) for l in open(sys.argv[1], encoding="utf-8") if l.strip()]
+print("rows           :", len(rows), "(expect 11094)")
+print("duplicate ids  :", len(rows) - len({r["id"] for r in rows}))
+print("api==n_llm     :", all(r.get("api_calls") == r.get("n_llm_calls") for r in rows))
+print("usage missing  :", sum(r.get("n_usage_missing", 0) for r in rows))
+print("unparsed       :", sum(1 for r in rows if not r.get("answer")))
+print("Pass@1         : %.2f%%" % (100 * sum(bool(r["correct"]) for r in rows) / len(rows)))
+PY
+```
+
+All four must hold: full row count, no duplicate ids, `api_calls == n_llm_calls` (two independent
+counters — a mismatch means a call went unrecorded), and `usage missing = 0` (otherwise token
+counts are only a lower bound and must not be used for cost).
+
+Compare two models on the same framework and dataset:
+
+```bash
+python scripts/compare_results.py --framework zero_shot --dataset pilot_100 --a <model-A> --b <model-B>
+```
+
+> **Statistics:** at `zero_shot` the three seeds often give *identical* answers (one-token answers
+> sampled at T = 0.3 are nearly deterministic). The statistical unit is therefore the **question**,
+> not the (question, seed) pair. Counting all three seeds as independent inflates significance.
+
+---
+
+## 7. Notes for a Methods section
+
+- **Quantization.** Every model runs 4-bit weight-only, but the schemes differ: AWQ (`sglang-*`
+  32B/70B), GGUF Q4_K_M (Ollama, v1), GPTQ (W4A16, Gemma on GPUs ≥ 8.0), and **W4A32** for Gemma
+  on older GPUs (§4.1).
+- **Context window** is 8,192 for every SGLang model.
+- **Temperature** is fixed per framework, not per model: 0.3 everywhere, except 0.5 for `cot_sc`
+  and 0.0 for the `self_refine` critique step.
+- **Truncation.** Generation limits are shared by all models (e.g. 512 tokens for `cot`). Verbose
+  models are cut off before stating an answer, and an unparsed answer is scored wrong. Measured on
+  Gemma-3-4B `cot`: 37.1 % of answers hit the limit, and 98.7 % of unparsed answers were truncated.
+  Report the truncation rate per model.
+- **Frameworks are re-implementations**, not exact replications of the authors' code — see
+  [`code/README.md`](code/README.md).
+
+---
+
+## 8. MedGemma 4-bit (self-quantized)
+
+No 4-bit MedGemma that follows a published recipe exists on Hugging Face. To keep the
+MedGemma ↔ Gemma-3 pair fair, MedGemma is quantized with **the same recipe RedHatAI used** for
+`RedHatAI/gemma-3-4b-it-quantized.w4a16`:
+
+```bash
+conda create -n quant python=3.11 -y && conda activate quant
+pip install "llmcompressor>=0.6" datasets "transformers>=4.50" accelerate
+python scripts/quantize_w4a16.py --model google/medgemma-4b-it --out ~/models/medgemma-4b-it-quantized.w4a16
+```
+
+Recommended check: quantize `google/gemma-3-4b-it` with the same script and compare it with the
+RedHatAI model on `pilot_100` — per-question agreement should be ~90 % or higher, otherwise the
+recipe was not reproduced. The output folder's `vimed_quantization.json` records the recipe and
+library versions. The result is W4A16, so it needs a GPU with compute capability ≥ 8.0 to serve.
+
+---
+
+## 9. Why SGLang
 
 | | Ollama (v1) | SGLang (v2) |
 |---|---|---|
-| Xử lý song song | `OLLAMA_NUM_PARALLEL=4`, mỗi request 1 slot cố định | continuous batching: 32–64+ sequence trong 1 batch |
-| Prefix trùng (system prompt, câu hỏi lặp qua nhiều bước MAS) | tính lại mỗi lần | RadixAttention cache KV theo prefix |
-| Tắt thinking Qwen3 | cổng native `/api/chat` (`"think": false`) | `chat_template_kwargs.enable_thinking=false` qua API OpenAI-compatible |
-| Context | `num_ctx` bake vào tag `*-ctx8k` | `--context-length 8192` (giới hạn mỗi request; KV pool cấp riêng theo `MEM_FRACTION`) |
-| Client concurrency | 4 | 32 mặc định, `--workers` để đổi |
+| Parallelism | fixed slots (`OLLAMA_NUM_PARALLEL=4`) | continuous batching, 32–64+ sequences per batch |
+| Repeated prefixes (system prompts, multi-agent steps) | recomputed each time | cached (RadixAttention) |
+| Disable Qwen3 thinking | native `/api/chat` with `"think": false` | `chat_template_kwargs.enable_thinking=false` |
+| Context | baked into the model tag | `--context-length` |
 
-## Kết quả kiểm chứng (11/09/2026, Quadro RTX 8000 48GB — Turing sm75)
+Validated on `pilot_100` (Qwen3-32B, 3 seeds): v1 Ollama 60.33 ± 0.58 %, v2 SGLang 61.33 ± 1.15 %,
+87.7 % per-question agreement — within the difference expected between two 4-bit formats.
+`zero_shot` on 100 questions: ~7.5 min → 12 s.
 
-Chi tiết: [`code/experiment/007-sglang-backend-setup/README.md`](code/experiment/007-sglang-backend-setup/README.md).
+## 10. Changes from v1
 
-| pilot_100, 3 seed | Ollama `qwen3-32b-ctx8k` (Q4_K_M, 4 worker) | SGLang `Qwen3-32B-AWQ` (32 worker) |
-|---|---:|---:|
-| zero_shot Pass@1 | 60,33 ± 0,58 % | **61,33 ± 1,15 %** (agreement từng câu 87,7 %) |
-| zero_shot thời gian / 100 câu | ~7,5 phút | **12 s** (~35×) |
-| cot thời gian / 100 câu (seed 42) | ~25 phút | **~9 phút** (~2,7×) — Pass@1 62 % vs 57 % |
-
-Δ Pass@1 nằm trong sai số giữa 2 kiểu lượng tử hoá 4-bit; null rate 0 → backend đúng. Số đo tốc độ là
-trường hợp xấu (GPU Turing không được sgl-kernel hỗ trợ, phải đi đường compat).
-
-## Thay đổi so với v1 (diff)
-
-- `infrastructure/config.py`: provider `sglang`, model `sglang-qwen3-32b` (= `Qwen/Qwen3-32B-AWQ`, cùng hạng 4-bit với v1) + vài model khác cùng họ v1, `SGLANG_BASE_URL`,
-  `OLLAMA_PROVIDERS` (1 chỗ duy nhất), `NUM_WORKERS_BY_PROVIDER` + `get_num_workers()`, `REQUEST_TIMEOUT`.
-- `infrastructure/llm_client.py`: client OpenAI dùng chung theo `base_url` (thread-safe); nhánh `sglang` truyền
-  `extra_body.chat_template_kwargs.enable_thinking` theo `think`; nhánh Ollama giữ nguyên.
-- `runner/run_experiments.py`: số worker theo provider, thêm `--workers`.
-- `requirements-client.txt`: phía client chỉ cần `openai` + `scipy`.
-- `scripts/`: **GX10:** `install_gx10.sh`, `serve_gx10.sh`. **Chung:** `sglang_smoke_test.py`, `compare_results.py`.
-  **Server x86 (`scripts/x86_cuda/`):** `install_sglang.sh`, `serve_sglang.sh`, `sglang_turing_launch.py`,
-  `sglang_turing_probe.py`, `sglang_awq_gemm_bench.py`.
-- Không đụng `frameworks/`, `metrics/`, `analysis/`, `data/`, prompt.
+- `infrastructure/config.py` — `sglang` and `litellm` providers and their models; one tuple for Ollama
+  providers; per-provider worker counts; `REQUEST_TIMEOUT`. The Groq provider was removed.
+- `infrastructure/llm_client.py` — shared, thread-safe OpenAI client per base URL; disables thinking
+  through `chat_template_kwargs`; records per-question token usage.
+- `runner/run_experiments.py` — `--workers`; records `tokens_in`, `tokens_out`, `n_llm_calls`,
+  `n_usage_missing`; writes a `.meta.json` per run.
+- `frameworks/` — every LLM step now stores its full `raw` output. Prompts and logic are unchanged.
+- `scripts/` — install, serve, smoke-test, compare, wait-and-run, quantize.
 
 ---
 
-## Chạy trên máy hiện tại (s96, Quadro RTX 8000 48GB — Turing sm75)
+## Appendix — GB10 native install (no Docker)
 
-Máy này **đã cài sẵn** từ 11/09: conda env `sglang` (sglang 0.5.9, torch 2.9.1+cu128, ninja, GCC 13) và
-model `Qwen/Qwen3-32B-AWQ` (19GB) trong `~/.cache/huggingface`. Không cần cài lại, chỉ chạy:
-
-```bash
-cd /home/hoangnv/Agent_medical/ViMedAgentv2/code
-
-# 1. GPU phải trống phần của mình — unload Ollama nếu đang giữ model 32B
-OLLAMA_HOST=127.0.0.1:11435 /storage/hoangnv/ollama-local/bin/ollama ps
-OLLAMA_HOST=127.0.0.1:11435 /storage/hoangnv/ollama-local/bin/ollama stop qwen3-32b-ctx8k
-
-# 2. serve (tmux) — GPU dùng chung với người khác nên để MEM_FRACTION=0.65
-tmux new -s sglang
-cd /home/hoangnv/Agent_medical/ViMedAgentv2/code
-MEM_FRACTION=0.65 MAX_RUNNING=32 bash scripts/x86_cuda/serve_sglang.sh
-#   chờ "The server is fired up and ready to roll!" (~2 phút: load 7s + capture CUDA graph 22s)
-#   Ctrl-b d để tách khỏi tmux
-
-# 3. chạy thí nghiệm (env sglang hoặc env agent đều được — chỉ cần openai + scipy)
-conda activate sglang
-cd /home/hoangnv/Agent_medical/ViMedAgentv2/code
-python scripts/sglang_smoke_test.py --model sglang-qwen3-32b
-python -m runner.run_experiments --dataset data/pilot_100.jsonl --framework zero_shot --model sglang-qwen3-32b
-python -m runner.run_experiments --dataset data/vm14k_clean.jsonl --framework cot --model sglang-qwen3-32b
-```
-
-Cài lại từ đầu (nếu đổi máy x86 khác hoặc env hỏng):
-
-```bash
-bash scripts/x86_cuda/install_sglang.sh      # conda env "sglang" + pip "sglang[all]" ~11GB, ~6 phút
-#   GPU sm<80 thì script tự cài thêm GCC 13 (cần cho kernel JIT)
-python scripts/x86_cuda/sglang_turing_probe.py   # kiểm tra kernel: jit_norm/jit_rope/triton awq phải OK
-```
-
-**Đặc thù máy này:** wheel `sgl-kernel` không có mã cho sm75 nên `serve_sglang.sh` tự chạy qua
-`scripts/x86_cuda/sglang_turing_launch.py` (JIT cho RMSNorm/RoPE, Triton cho AWQ và attention, PyTorch cho sampling).
-Cần `CUDA_HOME` trỏ CUDA 12.x (script tự tìm `/usr/local/cuda-12.9`) và g++ ≥ 10 (env có GCC 13). Nếu lỗi kernel,
-chạy probe ở trên trước khi sửa gì khác.
-
-**GPU dùng chung:** người khác thường chiếm ~8GB. `MEM_FRACTION=0.65` → SGLang giữ ~31GB (weights 18GB + KV 7GB),
-tổng ~39/48GB. Không chạy SGLang và Ollama cùng lúc với model 32B.
-
-**Tốc độ đo được:** zero_shot pilot_100 3 seed = 54 s (Ollama ~22 phút); cot 100 câu = ~9 phút (Ollama ~25 phút);
-decode ~90 token/s tổng ở 32 request (AWQ không có kernel int4 fused trên Turing nên mỗi bước phải giải nén weights).
-
-## Phụ lục — GX10 cài native (không Docker), theo thread NVIDIA forum "Run SGLang in Spark"
+From the NVIDIA forum thread *"Run SGLang in Spark"*:
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -375,7 +389,9 @@ uv pip install sgl-kernel --prerelease=allow --index-url https://docs.sglang.ai/
 uv pip install sglang --prerelease=allow
 uv pip install --force-reinstall torch torchvision torchaudio triton --index-url https://download.pytorch.org/whl/cu130
 uv pip install flashinfer-python openai scipy ninja
-python scripts/x86_cuda/sglang_turing_launch.py --model-path Qwen/Qwen3-32B-AWQ --host 127.0.0.1 --port 30000 \
-    --context-length 8192 --mem-fraction-static 0.23 --max-running-requests 32 --attention-backend triton --trust-remote-code
+python scripts/x86_cuda/sglang_turing_launch.py --model-path Qwen/Qwen3-32B-AWQ --host 127.0.0.1 \
+    --port 30000 --context-length 8192 --mem-fraction-static 0.23 --max-running-requests 32 \
+    --attention-backend triton --trust-remote-code
 ```
-(launcher quyết định theo probe: nếu sgl-kernel build đúng cho sm_121 thì nó không đổi gì.)
+
+The launcher probes the kernels first and changes nothing if `sgl-kernel` was built for `sm_121`.
