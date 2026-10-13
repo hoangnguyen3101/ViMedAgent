@@ -136,6 +136,19 @@ MODELS: dict[str, dict] = {
         # Giữ lại để đo mức sụt do lượng tử hoá nếu cần. Repo gated=manual.
         "model_id": "google/gemma-3-4b-it",
     },
+    "sglang-gemma3-4b-awq": {
+        "provider": "sglang",
+        # AWQ int4 (nhom 32, GEMM) — CHAY DUOC tren Turing sm75 (s96), kiem 12/10/2026.
+        # Bat buoc serve voi: DTYPE=float32 ATTN_BACKEND=torch_native
+        #   - fp16 lam Gemma 3 tran so -> NaN; sm75 khong co bf16 -> chi con fp32
+        #   - AWQ mac dinh chi nhan fp16: launcher (install_awq_fp32) mo them fp32
+        #     -> thuc chat la W4A32: trong so 4-bit, matmul fp32.
+        # KHAI TRONG METHODS: W4A32 khac W4A16/AWQ-fp16 cua cac model khac, vi phan
+        # cung. Recipe cua gaunernst KHONG cong bo (chi biet nhom 32) -> chua co ban
+        # MedGemma tuong ung; cap doi chung 4-bit phai tu luong tu hoa ca hai.
+        # Do o pilot_100: 6,14 GB VRAM.
+        "model_id": "gaunernst/gemma-3-4b-it-int4-awq",
+    },
     "sglang-gemma3-4b-w4a16": {
         "provider": "sglang",
         # Bản dùng cho bảng: W4A16 (GPTQ int4, group 128, compressed-tensors) của RedHatAI,
@@ -177,6 +190,30 @@ MODELS: dict[str, dict] = {
         # Qwen2.5 không có chế độ thinking → think=False không có tác dụng, đúng.
         # model_id = tên model group trong LiteLLM config.yaml, phải khớp chính xác.
         "model_id": "Qwen2.5-72B",
+    },
+    # ── Gemma 3 / MedGemma qua GX10 ──────────────────────
+    # Vi sao qua LiteLLM chu khong chay local: card s96 la Turing sm75, va CA HAI
+    # duong deu bi chan (kiem 12/10/2026, xem experiment 009):
+    #   bf16  -> SGLang ep xuong fp16 bat ke --dtype; logits Gemma tran fp16 ->
+    #            softmax ra inf/NaN -> sampler assert -> scheduler chet.
+    #            Da thu --enable-fp32-lm-head, --triton-attention-reduce-in-fp32,
+    #            DTYPE=bfloat16/float32, SGLANG_TURING_NO_JIT=1 — deu van sap.
+    #   W4A16 -> compressed-tensors chan cung: "Min capability: 80, Current: 75".
+    # GB10 la Blackwell sm121: co bf16 native va vuot sm80, nen chay duoc ca hai.
+    #
+    # model_id = ten model group trong config.yaml cua LiteLLM, phai khop CHINH XAC.
+    "litellm-gemma3-4b-w4a16": {
+        "provider": "litellm",
+        # Doi chung PHO THONG cho MedGemma. Cung co, cung ho, cung nen da ngu,
+        # chi khac o cho khong tinh chinh y khoa -> hieu so do duoc tac dung
+        # cua viec y khoa hoa. Trong so: RedHatAI/gemma-3-4b-it-quantized.w4a16
+        "model_id": "Gemma-3-4B-W4A16",
+    },
+    "litellm-medgemma-4b-w4a16": {
+        "provider": "litellm",
+        # Chua co tren HF — tao bang scripts/quantize_w4a16.py (lap DUNG recipe
+        # cua RedHatAI, xem docstring script), roi serve tren GX10.
+        "model_id": "MedGemma-4B-W4A16",
     },
 }
 

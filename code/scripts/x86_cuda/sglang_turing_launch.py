@@ -280,11 +280,93 @@ def install():
     logger.info("MultiPlatformOp.dispatch_forward hooked (sm<80 compat mode)")
 
 
+def install_fp32_passthrough():
+    """Let an explicit `--dtype float32` survive on sm<80.
+
+    SGLang 0.5.9 ModelRunner.load_model() does, unconditionally:
+
+        if torch.cuda.get_device_capability()[0] < 8:
+            self.server_args.dtype = "float16"
+            self.model_config.dtype = torch.float16
+
+    The reason it gives is "lack of bfloat16 support" — correct for bf16, but
+    sm75 runs float32 natively, so overriding an explicit float32 request is a
+    bug. It matters for Gemma 3: its activations overflow float16 (logits ->
+    inf -> softmax NaN -> sampler assert), and float32 is the only dtype that
+    is both supported on Turing and wide enough. Measured 12/10/2026, see
+    experiment 009.
+
+    Patched by rewriting that one condition to also require dtype != float32.
+    float16 / bfloat16 / auto behave exactly as before. If the source text no
+    longer matches (different SGLang version) this logs a warning and does
+    nothing rather than guessing.
+    """
+    import inspect, textwrap
+    from sglang.srt.model_executor import model_runner as mr
+    MR = mr.ModelRunner
+    if getattr(MR, "_turing_fp32_passthrough", False):
+        return
+    old_cond = "if torch.cuda.get_device_capability()[0] < 8:"
+    new_cond = ('if torch.cuda.get_device_capability()[0] < 8 '
+                'and str(self.server_args.dtype).lower() != "float32":')
+    try:
+        src = textwrap.dedent(inspect.getsource(MR.load_model))
+    except (OSError, TypeError) as e:
+        logger.warning(f"fp32 passthrough: cannot read load_model source ({e}); skipped")
+        return
+    if src.count(old_cond) != 1:
+        logger.warning("fp32 passthrough: load_model source changed; skipped")
+        return
+    ns = {}
+    exec(compile(src.replace(old_cond, new_cond), mr.__file__, "exec"), mr.__dict__, ns)
+    MR.load_model = ns["load_model"]
+    MR._turing_fp32_passthrough = True
+    logger.info("ModelRunner.load_model patched: explicit --dtype float32 kept on sm<80")
+
+
+def install_awq_fp32():
+    """Allow AWQ int4 weights with float32 activations (W4A32) on sm<80.
+
+    AWQConfig.get_supported_act_dtypes() returns [float16] only, so a 4-bit AWQ
+    model cannot be combined with the float32 that Gemma 3 needs on Turing
+    (float16 overflows -> NaN; bfloat16 does not exist on sm75).
+
+    The compute path itself is dtype-generic, checked against SGLang 0.5.9:
+      - AWQLinearMethod creates `scales` with dtype=params_dtype
+        -> float32 when the model runs in float32
+      - awq_dequantize_triton allocates its result with dtype=scales.dtype
+        -> dequantized weights come out float32
+      - apply() then does torch.matmul(x, w) -> float32 x float32
+      - the fused awq_gemm_triton path (which may assume float16) is already
+        disabled on this card (SGLANG_TURING_AWQ_GEMM_MAX_M -> M<=0)
+    So only the whitelist blocks it. Weights stay 4-bit in memory; only the
+    matmul runs in float32. float16 AWQ runs are unaffected.
+    """
+    import torch
+    from sglang.srt.layers.quantization import awq
+    cfg = awq.AWQConfig
+    if getattr(cfg, "_turing_awq_fp32", False):
+        return
+    orig = cfg.get_supported_act_dtypes
+
+    def get_supported_act_dtypes(self):
+        dts = list(orig(self))
+        if torch.float32 not in dts:
+            dts.append(torch.float32)
+        return dts
+
+    cfg.get_supported_act_dtypes = get_supported_act_dtypes
+    cfg._turing_awq_fp32 = True
+    logger.info("AWQConfig: float32 activations allowed (W4A32) on sm<80")
+
+
 # Module level: runs in the launcher process AND in every spawned child
 # (multiprocessing 'spawn' re-imports __main__ as __mp_main__).
 if compat_needed():
     os.environ["SGLANG_TURING_COMPAT"] = "1"   # children skip the nvidia-smi probe
     install()
+    install_fp32_passthrough()
+    install_awq_fp32()
 
 if __name__ == "__main__":
     import runpy

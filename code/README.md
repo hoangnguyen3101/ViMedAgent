@@ -122,65 +122,98 @@ Chỉ những key **không bị comment** trong dict `MODELS` mới hợp lệ v
 | `sglang-llama3.3-70b`    | sglang | `casperhansen/llama-3.3-70b-instruct-awq` |
 | `sglang-deepseek-r1-14b` | sglang | `deepseek-ai/DeepSeek-R1-Distill-Qwen-14B` |
 | `sglang-medgemma-4b`     | sglang | `google/medgemma-4b-it` — xem 3.3.1 |
-| `sglang-gemma3-4b-w4a16` | sglang | `RedHatAI/gemma-3-4b-it-quantized.w4a16` — đối chứng 4-bit của MedGemma (README gốc, mục Gemma) |
+| `sglang-gemma3-4b-awq`   | sglang | `gaunernst/gemma-3-4b-it-int4-awq` — **bản 4-bit chạy được trên s96** (W4A32), xem 3.3.1 |
+| `sglang-gemma3-4b-w4a16` | sglang | `RedHatAI/gemma-3-4b-it-quantized.w4a16` — chỉ chạy trên GPU ≥ sm80 (GX10), **chặn cứng trên s96** |
 | `sglang-medgemma-4b-w4a16` | sglang | tự lượng tử hoá bằng `scripts/quantize_w4a16.py`, cùng recipe RedHatAI |
 | `sglang-gemma3-4b`       | sglang | `google/gemma-3-4b-it` bf16 — chỉ để đo mức sụt do lượng tử hoá |
 | `litellm-llama3.3-70b-awq` | litellm | model group `Llama-3.3-70B` trên GX10 (AWQ) |
 | `litellm-qwen2.5-72b`    | litellm | model group `Qwen2.5-72B` trên GX10 (GPTQ-Int4) |
 
-#### 3.3.1. MedGemma-4B — model duy nhất phá ba giả định của bảng
+#### 3.3.1. Gemma 3 / MedGemma-4B
 
-`sglang-medgemma-4b` khác mọi model còn lại. Ba điểm **bắt buộc khai trong Methods**:
+`sglang-medgemma-4b` và đối chứng `sglang-gemma3-4b*` khác mọi model còn lại ở ba điểm
+**bắt buộc khai trong Methods**:
 
-1. **Không lượng tử hoá (bf16).** 8B/32B/70B đều 4-bit. Ép một model 4B xuống 4-bit
-   mất chất lượng nặng hơn nhiều so với 32B/70B, nên bf16 là lựa chọn đúng — nhưng
-   nó phá quy tắc "cùng hạng 4-bit" mà bảng v1/v2 dựa vào để so sánh.
-2. **Chuyên biệt y khoa**, các model khác phổ thông. Đứng một mình thì **không tách
-   được** ảnh hưởng của tinh chỉnh y khoa khỏi ảnh hưởng của cỡ 4B. Muốn tách phải
-   thêm `google/gemma-3-4b-it` làm đối chứng (cùng cỡ, cùng họ, cùng nền đa ngữ,
-   chỉ khác ở chỗ không tinh chỉnh y khoa); hiệu số MedGemma − Gemma3 khi đó là
-   tác dụng riêng của y khoa hoá.
-3. **Ngôn ngữ.** Tinh chỉnh y khoa của MedGemma chủ yếu trên dữ liệu **tiếng Anh**,
-   còn VM14K là **tiếng Việt**. Điểm thấp có thể do ngôn ngữ chứ không do y khoa —
-   reviewer chắc chắn nêu điểm này.
+1. **Kiểu lượng tử hoá.** Trên máy s96 chỉ chạy được 4-bit dưới dạng **W4A32** (trọng số
+   4-bit, nhân ma trận fp32) — các model khác là W4A16 / AWQ-fp16 / Q4_K_M. Lý do là phần
+   cứng, xem bên dưới. Vẫn cùng hạng *"4-bit chỉ-trọng-số"*, nhưng activation khác.
+2. **Chuyên biệt y khoa**, các model khác phổ thông. Đứng một mình thì **không tách được**
+   ảnh hưởng của tinh chỉnh y khoa khỏi ảnh hưởng của cỡ 4B. Vì vậy chạy kèm
+   `google/gemma-3-4b-it` làm đối chứng (cùng cỡ, cùng họ, cùng nền đa ngữ, chỉ khác ở chỗ
+   không tinh chỉnh y khoa); hiệu số MedGemma − Gemma3 là tác dụng riêng của y khoa hoá.
+3. **Ngôn ngữ.** Tinh chỉnh y khoa của MedGemma chủ yếu trên dữ liệu **tiếng Anh**, còn VM14K
+   là **tiếng Việt**.
 
-**Trước khi tải:** repo bị khoá (`gated=auto`). Phải bấm đồng ý điều khoản Health AI
-Developer Foundations tại <https://huggingface.co/google/medgemma-4b-it>, rồi dùng
-token có quyền (`HF_TOKEN=...` hoặc `~/.cache/huggingface/token`).
+**Trước khi tải:** `google/medgemma-4b-it` bị khoá (`gated=auto`) — đồng ý điều khoản Health AI
+Developer Foundations tại <https://huggingface.co/google/medgemma-4b-it> rồi dùng token có quyền.
+`google/gemma-3-4b-it` cũng gated (`manual`).
 
-**Đã kiểm ngày 24/09/2026** (SGLang 0.5.9):
+##### Chạy trên Turing sm75 (máy s96, Quadro RTX 8000) — đã kiểm 12/10/2026, SGLang 0.5.9
 
-| Hạng mục | Kết quả |
-|---|---|
-| Kiến trúc | `Gemma3ForConditionalGeneration`, `model_type=gemma3` |
-| SGLang hỗ trợ | có — `gemma3_causal.py` / `gemma3_mm.py` |
-| Đa phương thức | SGLang **tự tắt** (`Multimodal is disabled for gemma3`) → chạy text-only, không tốn chỗ cho tháp thị giác |
-| `role: "system"` trong prompt | **chạy được** — template Gemma 3 gộp system vào lượt user đầu; `raise_exception` chỉ bắt role không xen kẽ, mà prompt của repo luôn là `[system, user]` |
-| Trọng số | 8,01 GB (bf16), nạp thực tế 8,04 GB |
-| Context gốc | 131 072 (ta vẫn cap `CONTEXT_LEN=8192` như các model khác) |
+Gemma 3 được thiết kế cho **bf16**; Turing (2018) **không có bf16**. Cần **đồng thời ba thứ**,
+thiếu một là sập:
 
-**Lệnh chạy** (cổng 30001 để không đụng server 32B ở 30000):
+| # | Thay đổi | Vì sao |
+|---|---|---|
+| 1 | Bản vá launcher `install_fp32_passthrough()` | SGLang `model_runner.py:906` ép fp16 **vô điều kiện** trên sm<80, nuốt luôn `--dtype float32`. Lý do nó ghi là "thiếu bf16" — đúng với bf16, nhưng sm75 chạy fp32 bình thường, nên đây là lỗi logic. Bản vá chỉ sửa đúng điều kiện đó; fp16/auto giữ nguyên hành vi. |
+| 2 | `DTYPE=float32` | Ở fp16, logits Gemma tràn số → softmax ra `NaN` → sampler assert `probability tensor contains either inf, nan or element < 0` → scheduler chết ngay lời gọi đầu. |
+| 3 | `ATTN_BACKEND=torch_native` | Ở fp32, kernel attention triton với `head_dim=256` cần 69.760 B shared memory, Turing chỉ có 65.536 B → `OutOfResources`. |
+
+Để chạy **4-bit** cần thêm:
+
+| # | Thay đổi | Vì sao |
+|---|---|---|
+| 4 | Bản vá launcher `install_awq_fp32()` | `AWQConfig.get_supported_act_dtypes()` chỉ trả `[float16]`. Đường tính toán thật vốn đã chạy được fp32 (`scales` theo `params_dtype` → dequant ra `scales.dtype` → `matmul`), chỉ có danh sách kiểm tra chặn. Mở ra → **W4A32**. |
+
+Hai bản vá nằm trong `scripts/x86_cuda/sglang_turing_launch.py`, tự cài ở mọi tiến trình
+(kể cả scheduler con) và **chỉ có tác dụng khi truyền rõ `float32`** — các run Qwen/Llama fp16
+không bị ảnh hưởng.
+
+**Lệnh chạy (4-bit, W4A32):**
 
 ```bash
-MODEL=google/medgemma-4b-it PORT=30001 \
+# tmux gsrv
+MODEL=gaunernst/gemma-3-4b-it-int4-awq DTYPE=float32 ATTN_BACKEND=torch_native \
 MEM_FRACTION=0.35 MAX_RUNNING=32 CONTEXT_LEN=8192 \
-bash scripts/x86_cuda/serve_sglang.sh
+  bash scripts/x86_cuda/serve_sglang.sh
 
-export SGLANG_BASE_URL=http://127.0.0.1:30001/v1
-python -m runner.run_experiments --dataset data/vm14k_clean.jsonl \
-  --framework zero_shot --model sglang-medgemma-4b --workers 32
+# tmux grun — tự chờ server rồi chạy
+bash scripts/wait_and_run.sh zero_shot sglang-gemma3-4b-awq 32
 ```
 
-**Hai cảnh báo về phần cứng:**
+Bộ nhớ đo được: fp32 gốc **16,14 GB**; AWQ 4-bit **6,14 GB** (bảng embedding 262k từ và tháp
+thị giác không lượng tử hoá, mà ở fp32 chúng to gấp đôi so với bf16).
 
-- **Cần ≳16 GB VRAM trống.** 8 GB trọng số + KV cache. Trên máy s96 (Quadro RTX 8000
-  48 GB) khi server Qwen3-32B đang giữ 28,7 GB thì **không đủ chỗ** — SGLang nạp xong
-  trọng số rồi chết với `RuntimeError: Not enough memory`. Phải dừng server 32B trước,
-  hoặc chạy ở máy khác.
-- **Trên GPU sm < 80 (Turing/Volta), SGLang tự ép bf16 → fp16**
-  (`Casting torch.bfloat16 to torch.float16`). Họ Gemma có tiền sử tràn số ở fp16.
-  **Chưa kiểm chứng được** trên máy này vì server không lên nổi do thiếu VRAM.
-  Trên GPU Ampere trở lên (GX10 sm121) có bf16 gốc nên không gặp vấn đề này.
+**Đã thử và KHÔNG được — đừng thử lại:** `--enable-fp32-lm-head`,
+`--triton-attention-reduce-in-fp32`, `DTYPE=bfloat16` (sm75 không có), `SGLANG_TURING_NO_JIT=1`,
+`--disable-cuda-graph`, `torch_native` ở fp16. Bản `RedHatAI/gemma-3-4b-it-quantized.w4a16`
+(compressed-tensors) bị **chặn cứng**: `Min capability: 80. Current capability: 75` — không bản vá
+nào qua được, chỉ chạy trên GPU ≥ sm80 (GX10).
+
+##### Kết quả đã đo
+
+| Thí nghiệm | Model | Pass@1 | Ghi chú |
+|---|---|---|---|
+| `zero_shot`, `pilot_100`, fp32 cả hai | MedGemma-4B | **43,0%** [33,7 ; 52,8] | |
+| | Gemma3-4B | **32,0%** [23,7 ; 41,7] | |
+| | **Chênh lệch** | **+11,0 pp** [+1,4 ; +20,6] | McNemar exact **p = 0,043**, OR 2,57 |
+| `zero_shot`, `pilot_100`, AWQ 4-bit | Gemma3-4B | 33,0% | khớp fp32 (32,0%) → lượng tử hoá không làm giảm chất lượng |
+| `zero_shot`, `vm14k_clean` full, AWQ 4-bit | Gemma3-4B | **34,18%** [33,30 ; 35,07] | Easy 37,76 · Medium 32,76 · Hard 31,10 |
+
+CI 95% là Wilson trên **trục câu hỏi**. Ở `zero_shot`, 3 seed cho đáp án **giống hệt nhau**
+(đáp án 1 token, phân phối rất nhọn ở T=0,3) — nên đơn vị thống kê phải là **câu**, không phải
+(câu, seed). Đếm 300 cặp thay vì 100 câu là giả lặp: lần đầu tính ra p = 0,0002, đúng phải là
+p = 0,043.
+
+##### Hạn chế còn lại
+
+- **Chưa có MedGemma 4-bit.** Không có bản AWQ MedGemma nào trên HF, và recipe AWQ của
+  `gaunernst` không công bố. Để cặp đối chứng 4-bit công bằng phải **tự lượng tử hoá cả hai**
+  bằng cùng một recipe. Hiện chỉ so được ở fp32.
+- **Framework sinh dài rất chậm.** fp32 không dùng được tensor core fp16 của Turing, và
+  `torch_native` không có kernel hợp nhất. `zero_shot` (3 token ra) chạy ~36 phút/seed, nhưng
+  `cot` (tới 512 token ra) đo được **~5,5 câu/phút** → cỡ **4 ngày** cho 3 seed. Các framework
+  sinh dài nên chạy trên GX10.
 
 ### 3.4. Tham số suy luận (Inference settings)
 

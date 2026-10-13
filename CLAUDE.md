@@ -71,7 +71,7 @@ Hai bất biến đáng tin:
 | Điểm | Chi tiết |
 |---|---|
 | **Context 70B** | `ollama-llama3.3-70b` = ctx**4k**, còn 8B/32B = ctx8k. Lý do phần cứng ở `config.py`. |
-| **MedGemma-4B** | bf16 không lượng tử hoá (các model khác 4-bit) · chuyên biệt y khoa · tinh chỉnh tiếng Anh nhưng VM14K là tiếng Việt. Xem README 3.3.1. |
+| **Gemma 3 / MedGemma-4B** | trên s96 (Turing sm75) chỉ chạy được **W4A32** — trọng số 4-bit, nhân fp32 — vì fp16 làm Gemma tràn số và sm75 không có bf16; các model khác là W4A16/AWQ-fp16/Q4_K_M · chuyên biệt y khoa · tinh chỉnh tiếng Anh nhưng VM14K là tiếng Việt. Xem README 3.3.1. |
 | **Framework là mô phỏng** | MDAgents Moderate = 3 agent bỏ phiếu độc lập (không phải MDT tranh luận); High = 5 chuyên gia song song + 1 synthesizer (không phải ICT nhiều đội nối tiếp). |
 
 ## 6. Vận hành
