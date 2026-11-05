@@ -2,7 +2,7 @@
 ViMedAgent v2 — compare two result sets (e.g. Ollama backend vs SGLang backend).
 
 For a (framework, dataset) pair, loads every seed file of model A and model B
-under results(_test)/ and prints per-seed accuracy, mean±std, null rate, and
+under the dataset's result folder and prints per-seed accuracy, mean±std, null rate, and
 the per-question agreement between the two backends on matched (id, seed).
 
 Usage:
@@ -17,12 +17,12 @@ import statistics
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from infrastructure.config import FRAMEWORK_TIER, RESULTS_DIR, RESULTS_TEST_DIR
+from infrastructure.config import FRAMEWORK_TIER, get_results_dir
 
 
 def load(framework, model, dataset):
     safe = model.replace("/", "_").replace(".", "_")
-    root = RESULTS_TEST_DIR if dataset.startswith("pilot") else RESULTS_DIR
+    root = get_results_dir(dataset)
     pat = os.path.join(root, FRAMEWORK_TIER[framework], framework,
                        f"{framework}__{safe}__{dataset}__s*.jsonl")
     out = {}

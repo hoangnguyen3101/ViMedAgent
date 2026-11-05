@@ -23,6 +23,7 @@ import random
 import socket
 import threading
 import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
@@ -31,12 +32,12 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from infrastructure.config import (
-    RESULTS_DIR, RESULTS_TEST_DIR, EXPERIMENT_MATRIX, ALL_FRAMEWORKS,
+    EXPERIMENT_MATRIX, ALL_FRAMEWORKS, get_results_dir,
     MODEL_NAMES, SEEDS, N_RUNS, NUM_WORKERS, FRAMEWORK_TIER, get_num_workers,
     MODELS, DEFAULT_TEMPERATURE, REQUEST_TIMEOUT, get_base_url,
 )
 import infrastructure.config as cfg_mod
-from infrastructure.llm_client import reset_usage, get_usage
+from infrastructure.llm_client import reset_usage, get_usage, ANSWER_PARSER_VERSION
 from frameworks import (
     run_zero_shot, run_cot, run_cot_sc, run_self_refine,
     run_voting_ensemble,
@@ -45,6 +46,7 @@ from frameworks import (
     run_mad_debate,
 )
 from metrics.compute import compute_pass_at_1, compute_mean_std
+from data.loading import load_dataset
 
 
 # ── Framework dispatch ────────────────────────────────────
@@ -96,9 +98,8 @@ def dispatch(framework: str, sample: dict, model: str, seed: int) -> dict:
 # ── File helpers ──────────────────────────────────────────
 
 def result_dir(dataset_stem: str) -> str:
-    """Pilot/test datasets (stem starting with 'pilot') go to RESULTS_TEST_DIR
-    instead of RESULTS_DIR, so quick trial runs never mix into the real results."""
-    return RESULTS_TEST_DIR if dataset_stem.startswith("pilot") else RESULTS_DIR
+    """MedQA-US uses results_USMLE; VM14K uses its existing result folders."""
+    return get_results_dir(dataset_stem)
 
 
 def audit_trail_of(result: dict) -> list | None:
@@ -191,12 +192,15 @@ def _write_manifest(out_path, framework, model, dataset_path, seed, n_samples) -
         "max_tokens":    {k: v for k, v in sorted(vars(cfg_mod).items())
                           if k.startswith("MAX_TOKENS_")},
         "code_version":  _git_describe(),
+        "answer_parser_version": ANSWER_PARSER_VERSION,
         "runs": (prev.get("runs") or []) + [{
             "started": datetime.utcnow().isoformat(),
             "host":    socket.gethostname(),
             "python":  sys.version.split()[0],
         }],
     }
+    if prev.get("answer_reprocessing"):
+        meta["answer_reprocessing"] = prev["answer_reprocessing"]
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
 
@@ -227,15 +231,19 @@ def run_one_seed(
     """
     dataset_stem = Path(dataset_path).stem
     out_path = result_path(framework, model, dataset_stem, seed)
+    # Validate and adapt the entire input before writing files or calling a model.
+    samples = load_dataset(dataset_path)
+    if framework == "mdagents_vi":
+        missing = sum(not s.get("difficulty_level") for s in samples)
+        if missing:
+            print(f"  WARNING: {missing} samples lack difficulty_level; "
+                  "mdagents_vi uses the Medium fallback for them.")
+    elif framework == "medagents_vi":
+        missing = sum(not s.get("medical_topic") for s in samples)
+        if missing:
+            print(f"  WARNING: {missing} samples lack medical_topic; "
+                  "medagents_vi uses generic specialist roles for them.")
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
-
-    # Load dataset
-    samples = []
-    with open(dataset_path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                samples.append(json.loads(line))
 
     _write_manifest(out_path, framework, model, dataset_path, seed, len(samples))
 
@@ -399,7 +407,7 @@ def main():
     parser = argparse.ArgumentParser(description="ViMedAgent experiment runner")
     parser.add_argument(
         "--dataset", default="data/pilot_100.jsonl",
-        help="Path to dataset JSONL file",
+        help="Path to VM14K or MedQA JSONL (4 or 5 options)",
     )
     parser.add_argument(
         "--framework", default="zero_shot",
@@ -428,8 +436,28 @@ def main():
         help="Concurrent LLM calls (default: per-provider value from config, "
              "or env VIMED_NUM_WORKERS)",
     )
+    parser.add_argument(
+        "--validate-only", action="store_true",
+        help="Validate and summarize the dataset without LLM calls or result files",
+    )
     args   = parser.parse_args()
     resume = not args.no_resume
+
+    if args.validate_only:
+        try:
+            samples = load_dataset(args.dataset)
+        except (OSError, ValueError) as exc:
+            parser.error(str(exc))
+        print(f"Dataset: {args.dataset}")
+        print(f"Results directory: {get_results_dir(args.dataset)}")
+        print(f"Samples: {len(samples)} | Unique IDs: {len({s['id'] for s in samples})}")
+        print(f"Option counts: {dict(sorted(Counter(len(s['options']) for s in samples).items()))}")
+        print(f"Gold answers: {dict(sorted(Counter(s['answer'] for s in samples).items()))}")
+        print(f"Empty question strings: {sum(not s['question'].strip() for s in samples)}")
+        print(f"Missing difficulty_level: {sum(not s.get('difficulty_level') for s in samples)}")
+        print(f"Missing medical_topic: {sum(not s.get('medical_topic') for s in samples)}")
+        print("Validation passed. No model calls or result files created.")
+        return
 
     if args.all:
         total = len(EXPERIMENT_MATRIX) * N_RUNS

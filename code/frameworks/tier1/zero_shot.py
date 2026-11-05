@@ -33,7 +33,7 @@ def run_zero_shot(question: str, options: list[str], model: str) -> dict:
     msgs = build_prompt(question, options)
     raw  = call_llm(model, msgs, think=False)
     return {
-        "answer":    parse_answer(raw),
+        "answer":    parse_answer(raw, n_options=len(options)),
         "raw":       raw,
         "api_calls": 1,
     }

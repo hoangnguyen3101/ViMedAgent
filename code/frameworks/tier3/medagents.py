@@ -21,7 +21,7 @@ from infrastructure.config import (
     MAX_TOKENS_SHORT, MAX_TOKENS_ROLES, MAX_TOKENS_MEDIUM,
     MAX_TOKENS_AGENT,
 )
-from frameworks.utils import extract_reasoning, format_options
+from frameworks.utils import extract_reasoning, format_options, choice_letters, choice_names
 
 
 # ── Step 1: Expert Gathering ──────────────────────────────
@@ -89,8 +89,8 @@ def prompt_analysis(question: str, options: list[str], role: str) -> list[dict]:
                 f"Options:\n{format_options(options)}\n\n"
                 f"As a {role}, provide:\n"
                 f"1. Your analysis of the question\n"
-                f"2. Your evaluation of each option (A, B, C, D)\n"
-                f"3. Your answer (A/B/C/D)\n\n"
+                f"2. Your evaluation of each option ({', '.join(choice_letters(len(options)))})\n"
+                f"3. Your answer ({'/'.join(choice_letters(len(options)))})\n\n"
                 f"Be concise and systematic."
             ),
         },
@@ -151,7 +151,7 @@ def prompt_consult(question: str, options: list[str],
                 f"Consultation report from all specialists:\n{report}\n\n"
                 f"Your previous analysis:\n{own_analysis}\n\n"
                 f"Given the collective consultation, do you maintain or update your answer? "
-                f"State your final answer (A/B/C/D) and brief reasoning."
+                f"State your final answer ({'/'.join(choice_letters(len(options)))}) and brief reasoning."
             ),
         },
     ]
@@ -181,7 +181,7 @@ def prompt_decision(question: str, options: list[str],
                 f"Options:\n{format_options(options)}\n\n"
                 f"Final specialist positions:\n{opinions_str}\n\n"
                 f"Based on the collective consultation, what is the final answer? "
-                f"Respond with only 1 character: A, B, C, or D."
+                f"Respond with only 1 character: {choice_names(len(options))}."
             ),
         },
     ]
@@ -212,7 +212,7 @@ def run_medagents(question: str, options: list[str], model: str,
     for role in roles:
         msgs = prompt_analysis(question, options, role)
         raw  = call_llm(model, msgs, temperature=0.3, max_tokens=MAX_TOKENS_AGENT, think=False)
-        ans  = parse_answer(raw)
+        ans  = parse_answer(raw, n_options=len(options))
         api_calls += 1
         analyses.append({
             "role":     role,
@@ -234,7 +234,7 @@ def run_medagents(question: str, options: list[str], model: str,
     for a in analyses:
         msgs = prompt_consult(question, options, a["role"], report, a["analysis"])
         raw  = call_llm(model, msgs, temperature=0.3, max_tokens=MAX_TOKENS_MEDIUM, think=False)
-        ans  = parse_answer(raw)
+        ans  = parse_answer(raw, n_options=len(options))
         api_calls += 1
         final_opinions.append({
             "role":      a["role"],
@@ -248,7 +248,7 @@ def run_medagents(question: str, options: list[str], model: str,
     # ── Step 5: Decision Making ───────────────────────────
     msgs    = prompt_decision(question, options, final_opinions)
     raw_dec = call_llm(model, msgs, max_tokens=MAX_TOKENS_SHORT, think=False)
-    ans_dec = parse_answer(raw_dec)
+    ans_dec = parse_answer(raw_dec, n_options=len(options))
     api_calls += 1
     audit_trail.append({"step": "decision", "answer": ans_dec, "raw": raw_dec})
 

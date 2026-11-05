@@ -26,7 +26,7 @@ from infrastructure.llm_client import call_llm, parse_answer
 from infrastructure.config import (
     MAX_TOKENS_SHORT, MAX_TOKENS_COMPLEX, MAX_TOKENS_MEDIUM, MAX_TOKENS_AGENT,
 )
-from frameworks.utils import majority_vote, extract_reasoning, format_options
+from frameworks.utils import majority_vote, extract_reasoning, format_options, choice_letters, choice_names
 
 
 # ── Expert roles for High complexity ICT ─────────────────
@@ -115,7 +115,7 @@ def prompt_pcc(question: str, options: list[str]) -> list[dict]:
             "content": (
                 f"Medical question:\n{question}\n\n"
                 f"Options:\n{format_options(options)}\n\n"
-                f"Think step by step, then answer with a single character: A, B, C, or D."
+                f"Think step by step, then answer with a single character: {choice_names(len(options))}."
             ),
         },
     ]
@@ -136,7 +136,7 @@ def prompt_mdt_agent(question: str, options: list[str],
             "content": (
                 f"Medical question:\n{question}\n\n"
                 f"Options:\n{format_options(options)}\n\n"
-                f"Analyze carefully. Respond with only 1 character: A, B, C, or D."
+                f"Analyze carefully. Respond with only 1 character: {choice_names(len(options))}."
             ),
         },
     ]
@@ -157,7 +157,7 @@ def prompt_ict_expert(question: str, options: list[str],
             "content": (
                 f"Complex medical question requiring expert analysis:\n{question}\n\n"
                 f"Options:\n{format_options(options)}\n\n"
-                f"Provide your expert reasoning and final answer (A/B/C/D)."
+                f"Provide your expert reasoning and final answer ({'/'.join(choice_letters(len(options)))})."
             ),
         },
     ]
@@ -182,7 +182,7 @@ def prompt_ict_synthesizer(question: str, options: list[str],
                 f"Options:\n{format_options(options)}\n\n"
                 f"ICT specialist opinions:\n{opinions_str}\n\n"
                 f"Based on the collective expert reasoning, what is the final answer? "
-                f"Respond with only 1 character: A, B, C, or D."
+                f"Respond with only 1 character: {choice_names(len(options))}."
             ),
         },
     ]
@@ -211,7 +211,7 @@ def run_mdagents(question: str, options: list[str], model: str) -> dict:
     if complexity == "Low":
         msgs = prompt_pcc(question, options)
         raw  = call_llm(model, msgs, max_tokens=MAX_TOKENS_MEDIUM, think=False)
-        ans  = parse_answer(raw)
+        ans  = parse_answer(raw, n_options=len(options))
         api_calls += 1
         audit_trail.append({"step": "pcc", "answer": ans,
                             "reasoning": extract_reasoning(raw), "raw": raw})
@@ -228,13 +228,13 @@ def run_mdagents(question: str, options: list[str], model: str) -> dict:
         for i in range(3):
             msgs = prompt_mdt_agent(question, options, i)
             raw  = call_llm(model, msgs, think=False)
-            ans  = parse_answer(raw)
+            ans  = parse_answer(raw, n_options=len(options))
             votes.append(ans)
             api_calls += 1
             audit_trail.append({"step": "mdt", "agent": i + 1, "answer": ans,
                                 "reasoning": extract_reasoning(raw), "raw": raw})
         return {
-            "answer":           majority_vote(votes),
+            "answer":           majority_vote(votes, n_options=len(options)),
             "complexity":       complexity,
             "mode":             "mdt",
             "individual_votes": votes,
@@ -247,7 +247,7 @@ def run_mdagents(question: str, options: list[str], model: str) -> dict:
         for role in ICT_ROLES:
             msgs = prompt_ict_expert(question, options, role)
             raw  = call_llm(model, msgs, max_tokens=MAX_TOKENS_AGENT, think=False)
-            ans  = parse_answer(raw)
+            ans  = parse_answer(raw, n_options=len(options))
             api_calls += 1
             opinions.append({
                 "role":      role,
@@ -259,7 +259,7 @@ def run_mdagents(question: str, options: list[str], model: str) -> dict:
 
         msgs    = prompt_ict_synthesizer(question, options, opinions)
         raw_syn = call_llm(model, msgs, max_tokens=MAX_TOKENS_SHORT, think=False)
-        ans_syn = parse_answer(raw_syn)
+        ans_syn = parse_answer(raw_syn, n_options=len(options))
         api_calls += 1
         audit_trail.append({"step": "ict_synthesizer", "answer": ans_syn, "raw": raw_syn})
 

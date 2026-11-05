@@ -19,6 +19,7 @@ import os
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from infrastructure.choices import choice_letters
 from infrastructure.config import (
     MODELS, get_api_key, get_base_url, OLLAMA_PROVIDERS, REQUEST_TIMEOUT,
     MAX_RETRIES, RETRY_DELAY, DEFAULT_TEMPERATURE, MAX_TOKENS_LONG,
@@ -210,67 +211,93 @@ def call_llm(
     return ""
 
 
-def parse_answer(text: str) -> str | None:
-    """
-    Extract A/B/C/D from model output.
-    Returns None if no valid letter found.
-    Priority: exact single char → labeled → bold → parenthesised → standalone.
+ANSWER_PARSER_VERSION = "explicit-answer-v1"
 
-    Strips <think>...</think> blocks first (Qwen3, DeepSeek-R1 extended thinking)
-    so inner mentions of A/B/C/D in reasoning don't pollute matching.
+
+def parse_answer(text: str, n_options: int = 4) -> str | None:
     """
+    Extract a label from model output (A-D, or A-E for five options).
+    Prefer a final-answer declaration, then consistent answer declarations or
+    standalone answer lines. Conflicting declarations, out-of-range labels and
+    option discussion without an answer return None. Never consult the gold.
+    """
+    letters = choice_letters(n_options)
     if not text:
         return None
-    text = text.strip()
-
-    # Strip extended thinking blocks before any pattern matching
-    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+    # An unfinished thinking block contains no visible final answer either.
+    text = re.sub(r'<think>.*?(?:</think>|$)', '', text,
+                  flags=re.DOTALL | re.IGNORECASE).strip()
     if not text:
         return None
+    plain = re.sub(r'[*_`]', '', text)
+    # Capture even out-of-range letters so "Final answer: E" on a four-option
+    # question cannot silently fall back to an A-D mention in the explanation.
+    label = r'[\(\[\"\']?([A-Za-z])[\)\]\"\']?(?!\w)'
 
-    # Exact single character
-    if text in ("A", "B", "C", "D"):
-        return text
+    def value(match) -> str | None:
+        letter = match.group(1)
+        suffix = plain[match.end():]
+        # "answer is a beta-blocker" contains an article, not a label.
+        if letter == 'a' and re.match(r'\s+\w', suffix):
+            return None
+        # An unresolved "A or B" / "A/B" is not a single selected option.
+        if re.match(r'\s*(?:or\b|and\b|/|,)\s*\(?[A-Za-z]\)?(?!\w)',
+                    suffix, re.IGNORECASE):
+            return None
+        return letter.upper() if letter.upper() in letters else None
 
-    # "Final answer: B" (all frameworks that ask for CoT-style reasoning end
-    # with this exact literal marker — see cot/cot_sc/self_refine/medagents/
-    # mdagents prompts). Checked first and anchored on "final answer"
-    # specifically, since it is the one unambiguous conclusion marker.
-    m = re.search(r'final\s+answer[:\s]*\**\s*([ABCD])\b', text, re.IGNORECASE)
-    if m:
-        return m.group(1).upper()
-
-    # Bold **B**
-    m = re.search(r'\*\*([ABCD])\*\*', text)
-    if m:
-        return m.group(1).upper()
-
-    # Parenthesised (C)
-    m = re.search(r'\(([ABCD])\)', text)
-    if m:
-        return m.group(1).upper()
-
-    # hoangnv: weak fallback for free-text reasoning that never emits the
-    # literal "Final answer:" marker. "is" was dropped from the trigger
-    # words — under IGNORECASE it matches the indefinite article in plain
-    # English sentences like "The patient is a 62-year-old..." and silently
-    # extracts "A", regardless of the model's actual conclusion (confirmed:
-    # this skewed CoT's predicted-answer distribution to ~39% "A" vs a ~29%
-    # "A" gold rate, while zero_shot's single-char output — unaffected by
-    # this fallback — matched gold's distribution almost exactly).
-    # Last match is used instead of first: reasoning walks through each
-    # option in order (mentioning "answer"/"option"/"đáp án" for each one),
-    # so the *last* mention is closer to the actual conclusion than the
-    # first.
-    matches = list(re.finditer(
-        r'(?:answer|đáp án|đáp|option)[:\s]+([ABCD])\b', text, re.IGNORECASE,
+    final = list(re.finditer(
+        r'\bfinal\s+answer\b\s*(?:(?:is|would\s+be)\b\s*)?[:：=\-]?\s*' + label,
+        plain, re.IGNORECASE,
     ))
-    if matches:
-        return matches[-1].group(1).upper()
+    if final:
+        # An explicit final answer may revise an earlier provisional answer.
+        return value(final[-1])
 
-    # Last standalone letter mention (closest to the conclusion)
-    matches = list(re.finditer(r'\b([ABCD])\b', text))
-    if matches:
-        return matches[-1].group(1).upper()
+    candidates = []
+    declarations = re.finditer(
+        r'(?:\b(?:the\s+)?(?:(?:correct|best)\s+)?answer\b'
+        r'\s*(?:(?:is|would\s+be)\b\s*)?[:：=\-]?\s*'
+        r'|đáp\s+án\s*(?:đúng\s*)?(?:là\s*)?[:：=\-]?\s*'
+        r'|\bconclusion\b\s*[:：=\-]?\s*)' + label,
+        plain, re.IGNORECASE,
+    )
+    for match in declarations:
+        # Reject prose articles without blocking a later real declaration.
+        if match.group(1) == 'a' and re.match(r'\s+\w', plain[match.end():]):
+            continue
+        candidates.append(value(match))
 
+    # Bare labels on the first/last non-empty line are direct answers. Labels
+    # such as "Option D (...)" inside an explanation are deliberately ignored.
+    lines = [line.strip() for line in plain.splitlines() if line.strip()]
+    for line in (lines[0], lines[-1]):
+        match = re.fullmatch(label + r'[.!]?', line)
+        if match:
+            letter = match.group(1).upper()
+            candidates.append(letter if letter in letters else None)
+
+    # Explicit concluding choices can expose contradictory model output:
+    # "The correct answer is B. ... Therefore, option A ..." is ambiguous.
+    conclusions = re.finditer(
+        r'\b(?:therefore|thus|hence|in\s+conclusion)\b\s*[:,]?\s*'
+        r'(?:option\s+|I\s+(?:choose|select)\s+)' + label,
+        plain, re.IGNORECASE,
+    )
+    for match in conclusions:
+        suffix = plain[match.end():]
+        if re.match(r'\s*(?:\([^)]*\)\s*)?(?:(?:is|would\s+be)\s+)?'
+                    r'(?:not|incorrect|wrong|excluded|ruled\s+out)\b', suffix, re.IGNORECASE):
+            continue
+        candidates.append(value(match))
+
+    if candidates:
+        return candidates[0] if None not in candidates and len(set(candidates)) == 1 else None
+
+    # Retain unambiguous formatted labels, without choosing the first one in
+    # an option-by-option discussion. No arbitrary last-letter fallback.
+    formatted = re.findall(r'\*\*([A-Z])\*\*|\(([A-Z])\)', text)
+    labels = {bold or paren for bold, paren in formatted}
+    if len(labels) == 1 and labels <= set(letters):
+        return labels.pop()
     return None

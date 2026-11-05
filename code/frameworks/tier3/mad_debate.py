@@ -16,7 +16,7 @@ API calls: N * rounds (max 3*3=9, often less due to early stop)
 
 from infrastructure.llm_client import call_llm, parse_answer
 from infrastructure.config import MAX_TOKENS_DEBATE
-from frameworks.utils import majority_vote, format_options, extract_reasoning
+from frameworks.utils import majority_vote, format_options, extract_reasoning, choice_letters
 
 
 # ── Prompts ───────────────────────────────────────────────
@@ -37,7 +37,7 @@ def prompt_initial(question: str, options: list[str],
             "content": (
                 f"Medical question:\n{question}\n\n"
                 f"Options:\n{format_options(options)}\n\n"
-                f"State your reasoning and answer (A/B/C/D)."
+                f"State your reasoning and answer ({'/'.join(choice_letters(len(options)))})."
             ),
         },
     ]
@@ -66,7 +66,7 @@ def prompt_debate(question: str, options: list[str],
                 f"Options:\n{format_options(options)}\n\n"
                 f"Other agents' arguments:\n{others_str}\n\n"
                 f"Do you maintain your position or update it? "
-                f"Argue concisely. End with your answer (A/B/C/D)."
+                f"Argue concisely. End with your answer ({'/'.join(choice_letters(len(options)))})."
             ),
         },
     ]
@@ -89,7 +89,7 @@ def run_mad_debate(question: str, options: list[str], model: str,
     for i in range(n_agents):
         msgs = prompt_initial(question, options, i)
         raw  = call_llm(model, msgs, max_tokens=MAX_TOKENS_DEBATE, think=False)
-        ans  = parse_answer(raw)
+        ans  = parse_answer(raw, n_options=len(options))
         positions.append({"agent": i, "raw": raw, "answer": ans})
         api_calls += 1
         audit_trail.append({"round": 1, "agent": i + 1, "answer": ans,
@@ -115,7 +115,7 @@ def run_mad_debate(question: str, options: list[str], model: str,
             ]
             msgs = prompt_debate(question, options, i, rnd, other_args)
             raw  = call_llm(model, msgs, max_tokens=MAX_TOKENS_DEBATE, think=False)
-            ans  = parse_answer(raw)
+            ans  = parse_answer(raw, n_options=len(options))
             new_positions.append({"agent": i, "raw": raw, "answer": ans})
             api_calls += 1
             audit_trail.append({"round": rnd, "agent": i + 1, "answer": ans,
@@ -127,7 +127,7 @@ def run_mad_debate(question: str, options: list[str], model: str,
     final_votes = [p["answer"] for p in positions]
 
     return {
-        "answer":           majority_vote(final_votes),
+        "answer":           majority_vote(final_votes, n_options=len(options)),
         "final_votes":      final_votes,
         "individual_votes": final_votes,
         "audit_trail":      audit_trail,

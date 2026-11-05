@@ -268,6 +268,19 @@ PILOT_FILE  = "data/pilot_100.jsonl"
 FULL_FILE   = "data/vm14k_clean.jsonl"
 RESULTS_DIR      = "results"
 RESULTS_TEST_DIR = "results_test"   # dataset stems starting with "pilot" go here instead
+RESULTS_USMLE_DIR = "results_USMLE"
+
+
+def get_results_dir(dataset: str) -> str:
+    """Shared output routing for the runner, metrics and backend comparisons."""
+    stem = os.path.splitext(os.path.basename(dataset))[0].lower()
+    usmle_stems = {
+        "dev", "train", "test",
+        "phrases_no_exclude_dev", "phrases_no_exclude_train", "phrases_no_exclude_test",
+    }
+    if stem in usmle_stems or stem.startswith(("usmle", "medqa_us", "pilot_usmle", "pilot_medqa_us")):
+        return RESULTS_USMLE_DIR
+    return RESULTS_TEST_DIR if stem.startswith("pilot") else RESULTS_DIR
 
 # ── Inference ─────────────────────────────────────────────
 # DEFAULT_TEMPERATURE=0.3 uniformly across all frameworks (paper Section III.E).

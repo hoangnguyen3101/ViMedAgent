@@ -8,7 +8,7 @@ API calls: 1
 
 from infrastructure.llm_client import call_llm, parse_answer
 from infrastructure.config import MAX_TOKENS_LONG
-from frameworks.utils import format_options
+from frameworks.utils import format_options, choice_names
 
 
 def build_prompt(question: str, options: list[str]) -> list[dict]:
@@ -28,7 +28,7 @@ def build_prompt(question: str, options: list[str]) -> list[dict]:
                 f"{format_options(options)}\n\n"
                 f"Think step by step. "
                 f"After your reasoning, end with: "
-                f"'Final answer: X' where X is A, B, C, or D."
+                f"'Final answer: X' where X is {choice_names(len(options))}."
             ),
         },
     ]
@@ -42,7 +42,7 @@ def run_cot(question: str, options: list[str], model: str) -> dict:
     msgs = build_prompt(question, options)
     raw  = call_llm(model, msgs, max_tokens=MAX_TOKENS_LONG, think=False)
     return {
-        "answer":    parse_answer(raw),
+        "answer":    parse_answer(raw, n_options=len(options)),
         "raw":       raw,
         "api_calls": 1,
     }

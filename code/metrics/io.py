@@ -10,12 +10,14 @@ import json
 import os
 from dataclasses import dataclass, field
 
+from infrastructure.choices import SUPPORTED_LETTERS
+
 from infrastructure.config import (
     SEEDS, FRAMEWORK_TIER, ALL_FRAMEWORKS, MODEL_NAMES,
-    RESULTS_DIR, RESULTS_TEST_DIR,
+    get_results_dir,
 )
 
-OPTIONS = ("A", "B", "C", "D")
+OPTIONS = tuple(SUPPORTED_LETTERS)
 
 #: số câu kỳ vọng theo dataset — dùng để phát hiện run chạy dở
 EXPECTED_N = {"vm14k_clean": 11094, "pilot_100": 100}
@@ -92,7 +94,7 @@ def normalize(rec: dict, framework: str = None, model: str = None) -> dict:
 # ── đọc file ──────────────────────────────────────────────
 
 def results_root(dataset: str) -> str:
-    return RESULTS_TEST_DIR if dataset.startswith("pilot") else RESULTS_DIR
+    return get_results_dir(dataset)
 
 
 def run_path(framework, model, dataset, seed, root=None) -> str:
@@ -126,10 +128,11 @@ class Cell:
     model: str
     dataset: str
     seeds: dict[int, list[dict]] = field(default_factory=dict)
+    expected_samples: int = 0
 
     @property
     def expected_n(self) -> int:
-        return EXPECTED_N.get(self.dataset, 0)
+        return EXPECTED_N.get(self.dataset, self.expected_samples)
 
     @property
     def complete_seeds(self) -> list[int]:
@@ -166,10 +169,23 @@ class Cell:
 
 def load_cell(framework, model, dataset, root=None) -> Cell:
     c = Cell(framework, model, dataset)
+    expected_sizes = set()
     for seed in SEEDS:
         rs = load_run(framework, model, dataset, seed, root)
         if rs:
             c.seeds[seed] = rs
+            # New datasets (e.g. MedQA dev) declare their size in the runner's
+            # manifest instead of requiring a hardcoded entry in EXPECTED_N.
+            meta_path = run_path(framework, model, dataset, seed, root) + ".meta.json"
+            if dataset not in EXPECTED_N and os.path.exists(meta_path):
+                with open(meta_path, encoding="utf-8") as source:
+                    size = json.load(source).get("n_samples")
+                if type(size) is int and size > 0:
+                    expected_sizes.add(size)
+    if len(expected_sizes) > 1:
+        raise ValueError(f"Conflicting dataset sizes in manifests for {dataset}")
+    if expected_sizes:
+        c.expected_samples = expected_sizes.pop()
     return c
 
 

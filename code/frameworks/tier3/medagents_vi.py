@@ -162,7 +162,7 @@ def run_medagents_vi(question: str, options: list[str], model: str,
     for role in roles:
         msgs = prompt_analysis(question, options, role)
         raw  = call_llm(model, msgs, temperature=0.3, max_tokens=MAX_TOKENS_AGENT, think=False)
-        ans  = parse_answer(raw)
+        ans  = parse_answer(raw, n_options=len(options))
         api_calls += 1
         analyses.append({
             "role":     role,
@@ -184,7 +184,7 @@ def run_medagents_vi(question: str, options: list[str], model: str,
     for a in analyses:
         msgs = prompt_consult(question, options, a["role"], report, a["analysis"])
         raw  = call_llm(model, msgs, temperature=0.3, max_tokens=MAX_TOKENS_MEDIUM, think=False)
-        ans  = parse_answer(raw)
+        ans  = parse_answer(raw, n_options=len(options))
         api_calls += 1
         final_opinions.append({
             "role":      a["role"],
@@ -198,7 +198,7 @@ def run_medagents_vi(question: str, options: list[str], model: str,
     # ── Step 5: Decision Making ───────────────────────────
     msgs    = prompt_decision(question, options, final_opinions)
     raw_dec = call_llm(model, msgs, max_tokens=MAX_TOKENS_SHORT, think=False)
-    ans_dec = parse_answer(raw_dec)
+    ans_dec = parse_answer(raw_dec, n_options=len(options))
     api_calls += 1
     audit_trail.append({"step": "decision", "answer": ans_dec, "raw": raw_dec})
 

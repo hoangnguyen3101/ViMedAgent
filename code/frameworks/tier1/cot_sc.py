@@ -10,7 +10,7 @@ API calls: k (default 5)
 
 from infrastructure.llm_client import call_llm, parse_answer
 from infrastructure.config import COT_SC_TEMPERATURE, MAX_TOKENS_LONG
-from frameworks.utils import majority_vote, format_options
+from frameworks.utils import majority_vote, format_options, choice_letters, choice_names
 
 
 def build_prompt(question: str, options: list[str]) -> list[dict]:
@@ -31,7 +31,7 @@ def build_prompt(question: str, options: list[str]) -> list[dict]:
                 f"{format_options(options)}\n\n"
                 f"Think step by step. "
                 f"After your reasoning, end with: "
-                f"'Final answer: X' where X is A, B, C, or D."
+                f"'Final answer: X' where X is {choice_names(len(options))}."
             ),
         },
     ]
@@ -60,12 +60,12 @@ def run_cot_sc(
     for _ in range(k):
         msgs = build_prompt(question, options)
         raw  = call_llm(model, msgs, temperature=temperature, max_tokens=MAX_TOKENS_LONG, think=False)
-        ans  = parse_answer(raw)
+        ans  = parse_answer(raw, n_options=len(options))
         votes.append(ans)
         raws.append(raw)
 
-    first_valid = next((v for v in votes if v in ("A", "B", "C", "D")), None)
-    final       = majority_vote(votes, fallback=first_valid)
+    first_valid = next((v for v in votes if v in tuple(choice_letters(len(options)))), None)
+    final       = majority_vote(votes, fallback=first_valid, n_options=len(options))
 
     return {
         "answer":           final,

@@ -37,15 +37,17 @@ def answer_distribution(records: list[dict]) -> dict:
         return {"n": 0}
     gold = Counter(r.get("gold") for r in records)
     pred = Counter(r.get("answer") for r in records)
+    # Preserve the four-label diagnostic output for existing VM14K runs.
+    options = OPTIONS if gold.get("E") or pred.get("E") else OPTIONS[:4]
     prec = {}
-    for L in OPTIONS:
+    for L in options:
         sel = [r for r in records if r.get("answer") == L]
         prec[L] = (sum(1 for r in sel if r.get("gold") == L) / len(sel) * 100
                    if sel else None)
-    pred_pct = {L: pred.get(L, 0) / n * 100 for L in OPTIONS}
-    gold_pct = {L: gold.get(L, 0) / n * 100 for L in OPTIONS}
-    skew = {L: pred_pct[L] - gold_pct[L] for L in OPTIONS}
-    top = max(OPTIONS, key=lambda L: pred_pct[L])
+    pred_pct = {L: pred.get(L, 0) / n * 100 for L in options}
+    gold_pct = {L: gold.get(L, 0) / n * 100 for L in options}
+    skew = {L: pred_pct[L] - gold_pct[L] for L in options}
+    top = max(options, key=lambda L: pred_pct[L])
     have = {L: v for L, v in prec.items() if v is not None}
     worst = min(have, key=have.get) if have else None
     return {
@@ -54,7 +56,7 @@ def answer_distribution(records: list[dict]) -> dict:
         "pass1": sum(1 for r in records if r["_correct"]) / n * 100,
         "pred_pct": pred_pct, "gold_pct": gold_pct, "skew": skew,
         "precision": prec,
-        "max_skew_option": max(OPTIONS, key=lambda L: skew[L]),
+        "max_skew_option": max(options, key=lambda L: skew[L]),
         "max_skew_pp": max(skew.values()),
         "top_pred_option": top,
         "inverted_precision": top == worst,

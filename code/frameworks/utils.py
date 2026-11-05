@@ -4,15 +4,19 @@ ViMedAgent — Shared helpers for all frameworks
 
 from collections import Counter
 
+from infrastructure.choices import choice_letters, choice_names
 
-def majority_vote(answers: list, fallback: str | None = None) -> str | None:
+
+def majority_vote(answers: list, fallback: str | None = None,
+                  n_options: int = 4) -> str | None:
     """
-    Majority vote over A/B/C/D answers.
+    Majority vote over the labels available for this question.
     Tie-breaking: fall back to `fallback` if provided (e.g. first run's answer),
     otherwise alphabetical (A > B > C > D) for determinism.
     Returns None if no valid answer.
     """
-    valid = [a for a in answers if a in ("A", "B", "C", "D")]
+    letters = tuple(choice_letters(n_options))
+    valid = [a for a in answers if a in letters]
     if not valid:
         return None
 

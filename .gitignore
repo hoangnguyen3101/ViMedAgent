@@ -4,6 +4,7 @@
 # Publish these through Zenodo / a GitHub Release asset / Git LFS instead.
 code/results/
 code/results_test/
+code/results_USMLE/
 
 # Run manifests written next to each result file
 *.meta.json

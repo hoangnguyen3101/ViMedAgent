@@ -7,6 +7,8 @@ import math
 from collections import defaultdict, Counter
 from scipy.stats import binomtest, fisher_exact
 
+from infrastructure.choices import SUPPORTED_LETTERS
+
 
 # ── Pass@1 ────────────────────────────────────────────────
 def compute_pass_at_1(results: list) -> dict:
@@ -68,7 +70,7 @@ def compute_pass_at_k(results: list, k: int) -> dict:
         gold  = r.get("gold")
         if not votes or gold is None:
             continue
-        valid = [v for v in votes if v in ("A", "B", "C", "D")]
+        valid = [v for v in votes if v in tuple(SUPPORTED_LETTERS)]
         if not valid:
             continue
 
@@ -163,7 +165,7 @@ def compute_nmar(results: list) -> tuple:
         gold  = r.get("gold")
         if not votes or final is None or gold is None:
             continue
-        valid = [v for v in votes if v in ("A", "B", "C", "D")]
+        valid = [v for v in votes if v in tuple(SUPPORTED_LETTERS)]
         if not valid:
             continue
 

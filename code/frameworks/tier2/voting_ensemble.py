@@ -66,7 +66,7 @@ def run_voting_ensemble(
 
         msgs         = build_prompt(question, shuffled_opts)
         raw          = call_llm(model, msgs, think=False)
-        ans          = parse_answer(raw)
+        ans          = parse_answer(raw, n_options=len(options))
         original_ans = reverse_map.get(ans) if ans else None
 
         if run_idx == 0:
@@ -75,7 +75,7 @@ def run_voting_ensemble(
         votes.append(original_ans)
         raws.append(raw)
 
-    final = majority_vote(votes, fallback=first_answer)
+    final = majority_vote(votes, fallback=first_answer, n_options=len(options))
 
     return {
         "answer":           final,

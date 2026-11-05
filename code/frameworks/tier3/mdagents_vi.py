@@ -69,7 +69,7 @@ def run_mdagents_vi(question: str, options: list[str], model: str,
     if complexity == "Low":
         msgs = prompt_pcc(question, options)
         raw  = call_llm(model, msgs, max_tokens=MAX_TOKENS_MEDIUM, think=False)
-        ans  = parse_answer(raw)
+        ans  = parse_answer(raw, n_options=len(options))
         api_calls += 1
         audit_trail.append({"step": "pcc", "answer": ans,
                             "reasoning": extract_reasoning(raw), "raw": raw})
@@ -86,13 +86,13 @@ def run_mdagents_vi(question: str, options: list[str], model: str,
         for i in range(3):
             msgs = prompt_mdt_agent(question, options, i)
             raw  = call_llm(model, msgs, think=False)
-            ans  = parse_answer(raw)
+            ans  = parse_answer(raw, n_options=len(options))
             votes.append(ans)
             api_calls += 1
             audit_trail.append({"step": "mdt", "agent": i + 1, "answer": ans,
                                 "reasoning": extract_reasoning(raw), "raw": raw})
         return {
-            "answer":           majority_vote(votes),
+            "answer":           majority_vote(votes, n_options=len(options)),
             "complexity":       complexity,
             "mode":             "mdt",
             "individual_votes": votes,
@@ -105,7 +105,7 @@ def run_mdagents_vi(question: str, options: list[str], model: str,
         for role in ICT_ROLES:
             msgs = prompt_ict_expert(question, options, role)
             raw  = call_llm(model, msgs, max_tokens=MAX_TOKENS_AGENT, think=False)
-            ans  = parse_answer(raw)
+            ans  = parse_answer(raw, n_options=len(options))
             api_calls += 1
             opinions.append({
                 "role":      role,
@@ -117,7 +117,7 @@ def run_mdagents_vi(question: str, options: list[str], model: str,
 
         msgs    = prompt_ict_synthesizer(question, options, opinions)
         raw_syn = call_llm(model, msgs, max_tokens=MAX_TOKENS_SHORT, think=False)
-        ans_syn = parse_answer(raw_syn)
+        ans_syn = parse_answer(raw_syn, n_options=len(options))
         api_calls += 1
         audit_trail.append({"step": "ict_synthesizer", "answer": ans_syn, "raw": raw_syn})
 

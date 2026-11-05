@@ -15,7 +15,7 @@ API calls: 1 + r*(1+1) where r = actual rounds run (1..max_rounds)
 
 from infrastructure.llm_client import call_llm, parse_answer
 from infrastructure.config import MAX_TOKENS_LONG, MAX_TOKENS_MEDIUM
-from frameworks.utils import extract_reasoning, format_options
+from frameworks.utils import extract_reasoning, format_options, choice_names
 
 
 # ── Prompts ───────────────────────────────────────────────
@@ -36,7 +36,7 @@ def _prompt_initial(question: str, options: list[str]) -> list[dict]:
                 f"Choose the correct option from these answers:\n"
                 f"{format_options(options)}\n\n"
                 f"Think step by step. "
-                f"End with: 'Final answer: X' where X is A, B, C, or D."
+                f"End with: 'Final answer: X' where X is {choice_names(len(options))}."
             ),
         },
     ]
@@ -92,7 +92,7 @@ def _prompt_refine(
                 f"Your previous answer: {prev_answer}\n\n"
                 f"Critique:\n{critique}\n\n"
                 f"Revise your answer based on the critique. "
-                f"End with: 'Final answer: X' where X is A, B, C, or D."
+                f"End with: 'Final answer: X' where X is {choice_names(len(options))}."
             ),
         },
     ]
@@ -127,7 +127,7 @@ def run_self_refine(
     # Round 0: initial answer
     raw = call_llm(model, _prompt_initial(question, options),
                    temperature=0.3, max_tokens=MAX_TOKENS_LONG, think=False)
-    ans = parse_answer(raw)
+    ans = parse_answer(raw, n_options=len(options))
     api_calls += 1
 
     current_reasoning = extract_reasoning(raw)
@@ -166,7 +166,7 @@ def run_self_refine(
                            extract_reasoning(raw_crit)),
             temperature=0.3, max_tokens=MAX_TOKENS_LONG, think=False,
         )
-        ans_ref = parse_answer(raw_ref)
+        ans_ref = parse_answer(raw_ref, n_options=len(options))
         api_calls += 1
 
         current_reasoning = extract_reasoning(raw_ref)
