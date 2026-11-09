@@ -34,6 +34,7 @@ from infrastructure.config import (
     RESULTS_DIR, RESULTS_TEST_DIR, EXPERIMENT_MATRIX, ALL_FRAMEWORKS,
     MODEL_NAMES, SEEDS, N_RUNS, NUM_WORKERS, FRAMEWORK_TIER, get_num_workers,
     MODELS, DEFAULT_TEMPERATURE, REQUEST_TIMEOUT, get_base_url,
+    RESULT_ALIASES,
 )
 import infrastructure.config as cfg_mod
 from infrastructure.llm_client import reset_usage, get_usage
@@ -134,6 +135,35 @@ def result_path(framework: str, model: str, dataset_stem: str, seed: int) -> str
     )
 
 
+def _count_records(framework: str, model: str, dataset_stem: str) -> int:
+    """Số dòng kết quả của (framework, model) cộng qua mọi seed — 0 nếu chưa có file."""
+    n = 0
+    for seed in SEEDS:
+        path = result_path(framework, model, dataset_stem, seed)
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as f:
+                n += sum(1 for line in f if line.strip())
+    return n
+
+
+def resolve_output_model(framework: str, model: str, dataset_stem: str) -> str:
+    """Model key dùng cho TÊN FILE và trường "model" của record.
+
+    Mặc định là chính `model`. Nếu `model` có alias trong RESULT_ALIASES và chưa
+    có dòng nào cho framework này, trả alias có nhiều dòng nhất — để chạy bù
+    ghi tiếp vào file cũ của cùng backbone thay vì mở file mới. File rỗng
+    (0 dòng) không tính là "đã có".
+    """
+    if _count_records(framework, model, dataset_stem) > 0:
+        return model
+    best, best_n = model, 0
+    for alias in RESULT_ALIASES.get(model, []):
+        n = _count_records(framework, alias, dataset_stem)
+        if n > best_n:
+            best, best_n = alias, n
+    return best
+
+
 def load_done_ids(path: str) -> set:
     done = set()
     if os.path.exists(path):
@@ -160,12 +190,19 @@ def read_results(path: str) -> list:
 
 # ── Single-seed run ───────────────────────────────────────
 
-def _write_manifest(out_path, framework, model, dataset_path, seed, n_samples) -> None:
+def _write_manifest(out_path, framework, model, dataset_path, seed, n_samples,
+                    output_model=None, n_done_before=None) -> None:
     """Ghi <out>.meta.json: mọi thứ cần để tái lập run này mà tên file không nói được.
 
     Ghi đè mỗi lần chạy (kể cả resume) nên luôn phản ánh cấu hình lần chạy cuối;
     `runs` giữ lịch sử để biết một seed bị ngắt và chạy tiếp mấy lần.
+
+    `model` là model THẬT được gọi; `output_model` là key ghi trong tên file và
+    record (khác `model` khi chạy bù qua RESULT_ALIASES). Mỗi mục `runs` ghi
+    `served_by` + `n_done_before`: các dòng từ vị trí n_done_before trở đi (và
+    timestamp >= started) là do lần chạy đó sinh ra.
     """
+    output_model = output_model or model
     meta_path = out_path + ".meta.json"
     prev = {}
     if os.path.exists(meta_path):
@@ -179,7 +216,7 @@ def _write_manifest(out_path, framework, model, dataset_path, seed, n_samples) -
     provider = spec.get("provider")
     meta = {
         "framework":     framework,
-        "model":         model,
+        "model":         output_model,
         "model_id":      spec.get("model_id"),
         "provider":      provider,
         "base_url":      get_base_url(provider) if provider else None,
@@ -195,6 +232,9 @@ def _write_manifest(out_path, framework, model, dataset_path, seed, n_samples) -
             "started": datetime.utcnow().isoformat(),
             "host":    socket.gethostname(),
             "python":  sys.version.split()[0],
+            "served_by": {"model": model, "model_id": spec.get("model_id"),
+                          "provider": provider},
+            "n_done_before": n_done_before,
         }],
     }
     with open(meta_path, "w", encoding="utf-8") as f:
@@ -219,14 +259,20 @@ def run_one_seed(
     seed: int,
     resume: bool = True,
     workers: int | None = None,
+    output_model: str | None = None,
 ) -> list:
     """
     Run one (framework, model, seed) combination over the full dataset.
     Appends to per-seed JSONL file. Supports resume (skips done IDs).
     Returns list of all result records for this seed.
+
+    `output_model` (mặc định: resolve_output_model) là key dùng cho tên file và
+    trường "model" của record; `model` vẫn là model thật được gọi.
     """
     dataset_stem = Path(dataset_path).stem
-    out_path = result_path(framework, model, dataset_stem, seed)
+    if output_model is None:
+        output_model = resolve_output_model(framework, model, dataset_stem)
+    out_path = result_path(framework, output_model, dataset_stem, seed)
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
     # Load dataset
@@ -237,10 +283,11 @@ def run_one_seed(
             if line:
                 samples.append(json.loads(line))
 
-    _write_manifest(out_path, framework, model, dataset_path, seed, len(samples))
-
     done_ids  = load_done_ids(out_path) if resume else set()
     remaining = [s for s in samples if s["id"] not in done_ids]
+
+    _write_manifest(out_path, framework, model, dataset_path, seed, len(samples),
+                    output_model=output_model, n_done_before=len(done_ids))
 
     # v2: concurrency depends on the backend — Ollama caps at OLLAMA_NUM_PARALLEL
     # (4), SGLang batches server-side so 32+ in flight is the sweet spot.
@@ -248,6 +295,8 @@ def run_one_seed(
 
     tag = f"{framework} x {model} | seed={seed} | workers={n_workers}"
     print(f"\n  [{tag}]")
+    if output_model != model:
+        print(f"  File  : {os.path.basename(out_path)}  (ghi tiếp dưới tên '{output_model}')")
     print(f"  Total: {len(samples)} | Done: {len(done_ids)} | Remaining: {len(remaining)}")
 
     if not remaining:
@@ -287,7 +336,7 @@ def run_one_seed(
                         "id":             sample["id"],
                         "seed":           seed,
                         "framework":      framework,
-                        "model":          model,
+                        "model":          output_model,
                         "gold":           sample.get("answer"),
                         "answer":         result.get("answer"),
                         "correct":        is_correct,
@@ -365,9 +414,15 @@ def run_all_seeds(
     Run all N_RUNS seeds for one (framework, model) pair.
     Returns aggregated mean +/- std metrics.
     """
+    # Chốt một lần cho cả 3 seed để mọi seed cùng ghi vào một bộ file.
+    output_model = resolve_output_model(framework, model, Path(dataset_path).stem)
+    if output_model != model:
+        print(f"\n  [alias] {framework} x {model}: chưa có file '{model}', "
+              f"ghi tiếp vào file có sẵn của '{output_model}' (RESULT_ALIASES)")
     per_seed_metrics = []
     for seed in SEEDS:
-        results = run_one_seed(framework, model, dataset_path, seed, resume, workers)
+        results = run_one_seed(framework, model, dataset_path, seed, resume, workers,
+                               output_model=output_model)
         if results:
             per_seed_metrics.append(compute_pass_at_1(results))
 

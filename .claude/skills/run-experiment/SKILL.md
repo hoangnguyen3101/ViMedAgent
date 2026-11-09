@@ -62,6 +62,9 @@ python -m runner.run_experiments \
 
 - **Resume tự động**: kết quả append vào JSONL, `load_done_ids()` bỏ qua id đã xong. Ngắt rồi chạy lại
   đúng lệnh cũ là đi tiếp. `--no-resume` mới chạy lại từ đầu.
+- **Alias (06/11/2026)**: `RESULT_ALIASES` trong `config.py` — `sglang-qwen3-32b` chưa có dòng nào cho
+  framework thì runner ghi tiếp vào file `ollama2-qwen3-32b` (hoặc `ollama-qwen3-32b`, chọn key nhiều
+  dòng nhất), record mang tên alias. Model phục vụ thật nằm ở `.meta.json` → `runs[].served_by`.
 - `--workers`: SGLang 32, Ollama 4 (trần `OLLAMA_NUM_PARALLEL`). Bỏ trống thì `get_num_workers()` tự chọn.
 - Cột `calls=` trong dòng tiến độ là **tích luỹ trong phiên này**, không phải tổng toàn file.
 

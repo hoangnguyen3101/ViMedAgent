@@ -217,6 +217,19 @@ MODELS: dict[str, dict] = {
     },
 }
 
+# Model key → older keys of the SAME backbone whose result files the runner
+# should keep filling instead of opening a new file (hoangnv, 06/11/2026).
+# Rule (run_experiments.resolve_output_model): if the key itself already has
+# records for a framework, it is used as is; otherwise the alias with the most
+# records wins. So `--framework cot --model sglang-qwen3-32b` resumes
+# cot__ollama2-qwen3-32b__*.jsonl, while voting/MAD/MDAgents keep their sglang files.
+# The rows are written under the alias name (build_matrix groups by the
+# record's "model" field); which server actually produced them is recorded per
+# run in <file>.meta.json → runs[].served_by.
+RESULT_ALIASES: dict[str, list[str]] = {
+    "sglang-qwen3-32b": ["ollama2-qwen3-32b", "ollama-qwen3-32b"],
+}
+
 
 # Providers that speak Ollama's native /api/chat (needed for think=False).
 # Single source of truth — exp 004 root cause was this tuple living in 3 places.

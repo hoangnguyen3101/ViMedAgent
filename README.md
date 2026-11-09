@@ -264,6 +264,12 @@ bash scripts/wait_and_run.sh <framework> <model-key> <workers>
 
 - **Resume** — re-run the same command. Results are appended per question, and finished
   questions are skipped.
+- **Filling an older backbone's files** — `RESULT_ALIASES` in `infrastructure/config.py` maps a
+  model key to older keys of the same backbone. If the key has no records yet for a framework, the
+  runner keeps filling the alias file with the most records instead of opening a new one. For
+  example, `--framework cot --model sglang-qwen3-32b` resumes `cot__ollama2-qwen3-32b__*.jsonl`.
+  Rows are written under the alias name. The model that actually served each run is logged in
+  `<file>.meta.json` → `runs[].served_by`, with `n_done_before`.
 - **Stop** — the runner catches the first `Ctrl-C` of a seed and moves on to the next seed. To stop
   the whole run, press `Ctrl-C` until the prompt returns (once per remaining seed), or `kill` the
   process. Nothing already written is lost.
