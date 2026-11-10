@@ -5,6 +5,9 @@
 code/results/
 code/results_test/
 code/results_USMLE/
+code/results_ablation/
+# Result archives (results*.zip, 0.2–0.9 GB each)
+code/results*.zip
 
 # Run manifests written next to each result file
 *.meta.json

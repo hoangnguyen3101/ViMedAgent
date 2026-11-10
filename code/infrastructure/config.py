@@ -11,6 +11,7 @@ All other settings are referenced by the rest of the codebase via imports.
 """
 
 import os
+import re
 
 # ── API ───────────────────────────────────────────────────
 # Provider "groq" da bi go bo ngay 26/09/2026. Ly do: khong co ket qua nao
@@ -99,6 +100,13 @@ MODELS: dict[str, dict] = {
     "sglang-llama3.1-8b": {
         "provider": "sglang",
         "model_id": "meta-llama/Llama-3.1-8B-Instruct",
+    },
+    "sglang-llama3.1-8b-awq": {
+        "provider": "sglang",
+        # AWQ int4, cùng hạng 4-bit với tag Ollama llama3.1-8b-ctx8k (Q4_K_M).
+        # 2026-11-10: mọi kết quả 8B trong results/ mang nhãn này, kể cả các dòng thực
+        # chạy bằng Ollama — engine thật từng dòng ghi ở _RENAME_LLAMA8B_2026-11-10.md (gốc repo).
+        "model_id": "hugging-quants/Meta-Llama-3.1-8B-Instruct-AWQ-INT4",
     },
     "sglang-llama3.3-70b": {
         "provider": "sglang",
@@ -262,6 +270,26 @@ def get_base_url(provider: str) -> str:
     raise ValueError(f"Unknown provider: {provider}")
 
 
+def model_url_env(model_name: str) -> str:
+    """Env var naming a per-model SGLang endpoint, e.g. SGLANG_BASE_URL__SGLANG_LLAMA3_3_70B."""
+    return "SGLANG_BASE_URL__" + re.sub(r"[^A-Za-z0-9]", "_", model_name).upper()
+
+
+def get_model_base_url(model_name: str) -> str:
+    """Endpoint for one model key.
+
+    Ablation A (medagents_hetero) calls three SGLang models in the same question, so each
+    needs its own server. If the per-model env var (see model_url_env) is set it wins;
+    otherwise the provider default applies, so every existing run behaves exactly as before.
+    """
+    provider = MODELS[model_name]["provider"]
+    if provider == "sglang":
+        override = os.environ.get(model_url_env(model_name))
+        if override:
+            return override
+    return get_base_url(provider)
+
+
 # ── Paths ─────────────────────────────────────────────────
 DATA_DIR    = "data"
 PILOT_FILE  = "data/pilot_100.jsonl"
@@ -269,11 +297,14 @@ FULL_FILE   = "data/vm14k_clean.jsonl"
 RESULTS_DIR      = "results"
 RESULTS_TEST_DIR = "results_test"   # dataset stems starting with "pilot" go here instead
 RESULTS_USMLE_DIR = "results_USMLE"
+RESULTS_ABLATION_DIR = "results_ablation"   # VM14K subsets for the consultation ablations
 
 
 def get_results_dir(dataset: str) -> str:
     """Shared output routing for the runner, metrics and backend comparisons."""
     stem = os.path.splitext(os.path.basename(dataset))[0].lower()
+    if stem.startswith("vm14k_sub"):
+        return RESULTS_ABLATION_DIR
     usmle_stems = {
         "dev", "train", "test",
         "phrases_no_exclude_dev", "phrases_no_exclude_train", "phrases_no_exclude_test",
@@ -287,6 +318,13 @@ def get_results_dir(dataset: str) -> str:
 # CoT-SC is the only exception: T=0.5 for sampling diversity (paper Section III.B).
 DEFAULT_TEMPERATURE = 0.3
 COT_SC_TEMPERATURE  = 0.5   # CoT-SC only — paper explicitly states T=0.5
+
+# One temperature for EVERY call (overrides the per-step values above and in the frameworks,
+# e.g. CoT-SC 0.5, Self-Refine critique 0.0). Unset = per-step defaults, as in the main tables.
+# The consultation ablations on vm14k_sub2000 run with VIMED_FORCE_TEMPERATURE=0.3.
+# The runner records it in every .meta.json ("force_temperature").
+_FORCE_T = os.environ.get("VIMED_FORCE_TEMPERATURE")
+FORCE_TEMPERATURE = float(_FORCE_T) if _FORCE_T not in (None, "") else None
 MAX_RETRIES         = 3
 RETRY_DELAY         = 10    # seconds before retry on rate limit
 
@@ -327,6 +365,15 @@ MAX_TOKENS_LONG    = 512    # CoT reasoning, self-refine initial/refine
 MAX_TOKENS_AGENT   = 600    # per-expert full analysis
 MAX_TOKENS_DEBATE  = 400    # MAD debate rounds
 
+# One cap for every free-text step, set per machine without editing code:
+#   export VIMED_TOKEN_CAP=1024
+# Raises ROLES/MEDIUM/LONG/AGENT/DEBATE only; SHORT (one letter) and COMPLEX (one label)
+# keep their size. Same set the MedQA-USMLE runs used. The runner writes the effective
+# values into every .meta.json, so a run always records the caps it really used.
+_TOKEN_CAP = os.environ.get("VIMED_TOKEN_CAP")
+if _TOKEN_CAP:
+    MAX_TOKENS_ROLES = MAX_TOKENS_MEDIUM = MAX_TOKENS_LONG = MAX_TOKENS_AGENT = MAX_TOKENS_DEBATE = int(_TOKEN_CAP)
+
 # ── Multi-run settings ────────────────────────────────────
 # Each experiment is run N_RUNS times with different random seeds.
 # Results from all runs are aggregated to produce mean ± std in tables.
@@ -349,12 +396,17 @@ TIER3_FRAMEWORKS = [
 
 ALL_FRAMEWORKS = TIER1_FRAMEWORKS + TIER2_FRAMEWORKS + TIER3_FRAMEWORKS
 
+# Consultation ablations on a VM14K subset (advisor's experiments A and B). Kept out of
+# ALL_FRAMEWORKS so --all, EXPERIMENT_MATRIX and the paper tables never pick them up.
+ABLATION_FRAMEWORKS = ["medagents_hetero", "medagents_noreport"]   # frameworks/tier3/medagents_ablation.py
+
 # framework -> "tier1"/"tier2"/"tier3", used to place result files under
 # results(_test)/tier{N}/<framework>/ instead of a flat directory.
 FRAMEWORK_TIER = {
     **{fw: "tier1" for fw in TIER1_FRAMEWORKS},
     **{fw: "tier2" for fw in TIER2_FRAMEWORKS},
     **{fw: "tier3" for fw in TIER3_FRAMEWORKS},
+    **{fw: "tier3" for fw in ABLATION_FRAMEWORKS},
 }
 
 # ── Experiment matrix ─────────────────────────────────────

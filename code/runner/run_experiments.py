@@ -32,9 +32,10 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from infrastructure.config import (
-    EXPERIMENT_MATRIX, ALL_FRAMEWORKS, get_results_dir,
+    EXPERIMENT_MATRIX, ALL_FRAMEWORKS, ABLATION_FRAMEWORKS, get_results_dir,
     MODEL_NAMES, SEEDS, N_RUNS, NUM_WORKERS, FRAMEWORK_TIER, get_num_workers,
-    MODELS, DEFAULT_TEMPERATURE, REQUEST_TIMEOUT, get_base_url,
+    MODELS, DEFAULT_TEMPERATURE, COT_SC_TEMPERATURE, FORCE_TEMPERATURE, REQUEST_TIMEOUT,
+    get_base_url, get_model_base_url, model_url_env, get_api_key,
 )
 import infrastructure.config as cfg_mod
 from infrastructure.llm_client import reset_usage, get_usage, ANSWER_PARSER_VERSION
@@ -44,6 +45,10 @@ from frameworks import (
     run_medagents, run_medagents_vi,
     run_mdagents,  run_mdagents_vi,
     run_mad_debate,
+)
+# Consultation ablations: imported directly so frameworks/__init__.py stays as in v1.
+from frameworks.tier3.medagents_ablation import (
+    run_medagents_hetero, run_medagents_noreport, HETERO_PANEL, NOREPORT_CONSULT_INPUT,
 )
 from metrics.compute import compute_pass_at_1, compute_mean_std
 from data.loading import load_dataset
@@ -91,6 +96,10 @@ def dispatch(framework: str, sample: dict, model: str, seed: int) -> dict:
         return run_mdagents_vi(q, opts, model, difficulty_level=diff)
     elif framework == "mad_debate":
         return run_mad_debate(q, opts, model)
+    elif framework == "medagents_hetero":
+        return run_medagents_hetero(q, opts, model)
+    elif framework == "medagents_noreport":
+        return run_medagents_noreport(q, opts, model)
     else:
         raise ValueError(f"Unknown framework: {framework!r}")
 
@@ -183,11 +192,13 @@ def _write_manifest(out_path, framework, model, dataset_path, seed, n_samples) -
         "model":         model,
         "model_id":      spec.get("model_id"),
         "provider":      provider,
-        "base_url":      get_base_url(provider) if provider else None,
+        "base_url":      get_model_base_url(model) if provider else None,
         "dataset":       os.path.abspath(dataset_path),
         "n_samples":     n_samples,
         "seed":          seed,
         "temperature":   DEFAULT_TEMPERATURE,
+        "cot_sc_temperature": COT_SC_TEMPERATURE,
+        "force_temperature": FORCE_TEMPERATURE,   # not None = every call used this temperature
         "request_timeout_s": REQUEST_TIMEOUT,
         "max_tokens":    {k: v for k, v in sorted(vars(cfg_mod).items())
                           if k.startswith("MAX_TOKENS_")},
@@ -199,21 +210,78 @@ def _write_manifest(out_path, framework, model, dataset_path, seed, n_samples) -
             "python":  sys.version.split()[0],
         }],
     }
+    if framework in ("medagents_hetero", "medagents_noreport"):
+        # expert slot i -> model; gathering, report and decision use `model`
+        panel = HETERO_PANEL if framework == "medagents_hetero" else (model,) * 3
+        meta["panel"] = [{"slot": i + 1, "model": m, "model_id": MODELS[m]["model_id"],
+                          "base_url": get_model_base_url(m)} for i, m in enumerate(panel)]
+        meta["consult_input"] = "report" if framework == "medagents_hetero" else NOREPORT_CONSULT_INPUT
     if prev.get("answer_reprocessing"):
         meta["answer_reprocessing"] = prev["answer_reprocessing"]
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
 
 
+# Paths whose state decides what a run computes; uncommitted changes here mark the run "-dirty".
+_RUN_CODE_PATHS = ("frameworks", "infrastructure", "runner", "data/loading.py")
+
+
 def _git_describe() -> str | None:
-    """Không phải repo git nên thường trả None; giữ chỗ nếu sau này init git."""
+    """Short HEAD hash, plus "-dirty" when run-affecting code differs from HEAD.
+
+    Without the suffix a run made with uncommitted framework/config changes would be
+    recorded under the parent commit, i.e. under code it did not actually use.
+    """
     try:
         import subprocess
-        return subprocess.check_output(
-            ["git", "-C", str(Path(__file__).resolve().parent.parent), "rev-parse", "--short", "HEAD"],
+        code_dir = str(Path(__file__).resolve().parent.parent)
+        head = subprocess.check_output(
+            ["git", "-C", code_dir, "rev-parse", "--short", "HEAD"],
             stderr=subprocess.DEVNULL, text=True, timeout=5).strip()
+        status = subprocess.check_output(
+            ["git", "-C", code_dir, "status", "--porcelain", "--", *_RUN_CODE_PATHS],
+            stderr=subprocess.DEVNULL, text=True, timeout=10)
+        dirty = any(line.strip() and "__pycache__" not in line for line in status.splitlines())
+        return head + ("-dirty" if dirty else "")
     except Exception:
         return None
+
+
+def check_endpoints(models: list[str]) -> None:
+    """Fail fast unless every SGLang model has its own endpoint serving exactly that model.
+
+    An SGLang server serves one model and largely ignores the request's model name, so a
+    model whose URL is missing would silently be answered by whatever the default server
+    runs. Used by the heterogeneous-panel ablation, where three models share one question.
+    """
+    import urllib.request
+    problems, seen = [], {}
+    for m in dict.fromkeys(models):
+        spec = MODELS[m]
+        if spec["provider"] != "sglang":
+            continue
+        env = model_url_env(m)
+        url = os.environ.get(env)
+        if not url:
+            problems.append(f"{m}: set {env}=http://<host>:<port>/v1")
+            continue
+        if url in seen:
+            problems.append(f"{m} and {seen[url]} share the endpoint {url}")
+        seen[url] = m
+        try:
+            req = urllib.request.Request(url.rstrip("/") + "/models",
+                                         headers={"Authorization": f"Bearer {get_api_key('sglang')}"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                served = [d.get("id") for d in json.loads(resp.read()).get("data", [])]
+        except Exception as exc:
+            problems.append(f"{m}: cannot reach {url}/models ({exc})")
+            continue
+        if spec["model_id"] not in served:
+            problems.append(f"{m}: {url} serves {served}, expected {spec['model_id']!r}")
+    if problems:
+        raise SystemExit("Endpoint check failed:\n  " + "\n  ".join(problems))
+    print("Endpoint check OK: " + ", ".join(f"{m} -> {os.environ[model_url_env(m)]}"
+                                            for m in dict.fromkeys(models) if MODELS[m]["provider"] == "sglang"))
 
 
 def run_one_seed(
@@ -368,13 +436,14 @@ def run_all_seeds(
     dataset_path: str,
     resume: bool = True,
     workers: int | None = None,
+    seeds: list[int] | None = None,
 ) -> dict:
     """
-    Run all N_RUNS seeds for one (framework, model) pair.
-    Returns aggregated mean +/- std metrics.
+    Run the given seeds (default: all N_RUNS seeds in config.SEEDS) for one
+    (framework, model) pair. Returns aggregated mean +/- std metrics.
     """
     per_seed_metrics = []
-    for seed in SEEDS:
+    for seed in (seeds or SEEDS):
         results = run_one_seed(framework, model, dataset_path, seed, resume, workers)
         if results:
             per_seed_metrics.append(compute_pass_at_1(results))
@@ -411,7 +480,7 @@ def main():
     )
     parser.add_argument(
         "--framework", default="zero_shot",
-        choices=ALL_FRAMEWORKS,
+        choices=ALL_FRAMEWORKS + ABLATION_FRAMEWORKS,
         help="Single framework to run (ignored when --all is set)",
     )
     parser.add_argument(
@@ -435,6 +504,10 @@ def main():
         "--workers", type=int, default=None,
         help="Concurrent LLM calls (default: per-provider value from config, "
              "or env VIMED_NUM_WORKERS)",
+    )
+    parser.add_argument(
+        "--seeds", type=int, nargs="+", default=None,
+        help=f"Seeds to run for a single framework/model (default: config.SEEDS = {SEEDS})",
     )
     parser.add_argument(
         "--validate-only", action="store_true",
@@ -487,7 +560,9 @@ def main():
         print(f"{'='*75}")
 
     else:
-        run_all_seeds(args.framework, args.model, args.dataset, resume, args.workers)
+        if args.framework == "medagents_hetero":
+            check_endpoints([args.model, *HETERO_PANEL])
+        run_all_seeds(args.framework, args.model, args.dataset, resume, args.workers, seeds=args.seeds)
 
 
 if __name__ == "__main__":

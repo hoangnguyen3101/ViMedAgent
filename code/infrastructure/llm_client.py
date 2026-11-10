@@ -21,8 +21,8 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from infrastructure.choices import choice_letters
 from infrastructure.config import (
-    MODELS, get_api_key, get_base_url, OLLAMA_PROVIDERS, REQUEST_TIMEOUT,
-    MAX_RETRIES, RETRY_DELAY, DEFAULT_TEMPERATURE, MAX_TOKENS_LONG,
+    MODELS, get_api_key, get_base_url, get_model_base_url, OLLAMA_PROVIDERS, REQUEST_TIMEOUT,
+    MAX_RETRIES, RETRY_DELAY, DEFAULT_TEMPERATURE, MAX_TOKENS_LONG, FORCE_TEMPERATURE,
 )
 
 
@@ -66,6 +66,20 @@ def _add_usage(tin, tout) -> None:
         return
     _usage.tokens_in  = getattr(_usage, "tokens_in", 0)  + int(tin or 0)
     _usage.tokens_out = getattr(_usage, "tokens_out", 0) + int(tout or 0)
+
+
+# ── Last call (thread-local) ──────────────────────────────
+# Per-call details for frameworks that log each step (the consultation ablations):
+# which model answered, its tokens and why generation stopped ("length" = hit max_tokens).
+# Same one-question-per-thread invariant as the usage counter above. Existing
+# frameworks never read it, so their output is unchanged.
+_last = threading.local()
+
+
+def get_last_call() -> dict:
+    """Details of the most recent call_llm in this thread: model, model_id, temperature,
+    max_tokens, tokens_in, tokens_out, finish_reason (None if the server did not say)."""
+    return dict(getattr(_last, "info", None) or {})
 
 
 # ── Shared OpenAI clients ─────────────────────────────────
@@ -122,6 +136,8 @@ def _call_ollama_native(
         data = json.loads(resp.read())
     # Ollama native đặt tên khác OpenAI: prompt_eval_count / eval_count.
     _add_usage(data.get("prompt_eval_count"), data.get("eval_count"))
+    _last.info = {"tokens_in": data.get("prompt_eval_count"), "tokens_out": data.get("eval_count"),
+                  "finish_reason": data.get("done_reason")}
     return data["message"]["content"].strip()
 
 
@@ -160,14 +176,21 @@ def call_llm(
     model_id = cfg["model_id"]
     provider = cfg["provider"]
     api_key  = get_api_key(provider)
-    base_url = get_base_url(provider)
+    base_url = get_model_base_url(model_name)   # = get_base_url(provider) unless a per-model URL is set
+    if FORCE_TEMPERATURE is not None:           # VIMED_FORCE_TEMPERATURE: one temperature for every call
+        temperature = FORCE_TEMPERATURE
+    call_info = {"model": model_name, "model_id": model_id,
+                 "temperature": temperature, "max_tokens": max_tokens}
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
+            _last.info = None
             if provider in OLLAMA_PROVIDERS and think is not None:
-                return _call_ollama_native(
+                text = _call_ollama_native(
                     base_url, model_id, messages, temperature, max_tokens, think,
                 )
+                _last.info = {**call_info, **(getattr(_last, "info", None) or {})}
+                return text
 
             client = _get_client(api_key, base_url)
             kwargs = dict(
@@ -186,8 +209,11 @@ def call_llm(
             # comment on "ollama-qwen3-32b" / qwen3-32b-ctx8k Modelfile).
             resp = client.chat.completions.create(**kwargs)
             u = getattr(resp, "usage", None)
-            _add_usage(getattr(u, "prompt_tokens", None) if u else None,
-                       getattr(u, "completion_tokens", None) if u else None)
+            tin = getattr(u, "prompt_tokens", None) if u else None
+            tout = getattr(u, "completion_tokens", None) if u else None
+            _add_usage(tin, tout)
+            _last.info = {**call_info, "tokens_in": tin, "tokens_out": tout,
+                          "finish_reason": getattr(resp.choices[0], "finish_reason", None)}
             content = resp.choices[0].message.content
             return (content or "").strip()
 

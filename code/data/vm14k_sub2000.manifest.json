@@ -1,0 +1,1144 @@
+{
+ "purpose": "Fixed VM14K subset for the consultation ablations: baseline MedAgents (Qwen), A (heterogeneous panel), B (no report), CoT-SC (Qwen).",
+ "script": "code/data/make_vm14k_subset.py",
+ "source": "data/vm14k_clean.jsonl",
+ "source_sha256": "a131243274cadb03b6346b42f65d419138518c8b5f725937c28b08fac5c8940d",
+ "source_rows": 11094,
+ "population": "one ID per exact content (min string ID), conflicting-gold groups dropped",
+ "population_size": 10139,
+ "n": 2000,
+ "seed": 42,
+ "stratum": "DIFFICULTY_MAP(difficulty_level) x medical_topic[0]",
+ "allocation": "proportional, largest remainder",
+ "n_strata": 177,
+ "n_strata_sampled": 138,
+ "ids_sha256": "c6595eeedfd5a202c8f79e8e56562ce464beb003563bc4556a1488acfdf68f99",
+ "files": {
+  "jsonl": "vm14k_sub2000.jsonl",
+  "ids": "vm14k_sub2000_ids.txt"
+ },
+ "allocation_by_stratum": {
+  "Easy | ": {
+   "population": 2,
+   "sampled": 1
+  },
+  "Easy | Allergy and Immunology": {
+   "population": 47,
+   "sampled": 9
+  },
+  "Easy | Analytical Chemistry": {
+   "population": 10,
+   "sampled": 2
+  },
+  "Easy | Anatomy": {
+   "population": 23,
+   "sampled": 5
+  },
+  "Easy | Anesthesiology": {
+   "population": 19,
+   "sampled": 4
+  },
+  "Easy | Biochemistry": {
+   "population": 20,
+   "sampled": 4
+  },
+  "Easy | Botany": {
+   "population": 1,
+   "sampled": 0
+  },
+  "Easy | Cardiology": {
+   "population": 26,
+   "sampled": 5
+  },
+  "Easy | Cell Biology": {
+   "population": 8,
+   "sampled": 2
+  },
+  "Easy | Chemistry": {
+   "population": 12,
+   "sampled": 2
+  },
+  "Easy | Dentistry": {
+   "population": 43,
+   "sampled": 9
+  },
+  "Easy | Dermatology": {
+   "population": 40,
+   "sampled": 8
+  },
+  "Easy | Eastern Medicine": {
+   "population": 31,
+   "sampled": 6
+  },
+  "Easy | Embryology": {
+   "population": 19,
+   "sampled": 4
+  },
+  "Easy | Emergency Medicine": {
+   "population": 8,
+   "sampled": 2
+  },
+  "Easy | Endocrinology": {
+   "population": 157,
+   "sampled": 31
+  },
+  "Easy | Endodontics": {
+   "population": 2,
+   "sampled": 0
+  },
+  "Easy | Forensic Medicine": {
+   "population": 1,
+   "sampled": 0
+  },
+  "Easy | Gastroenterology": {
+   "population": 298,
+   "sampled": 59
+  },
+  "Easy | General Medicine": {
+   "population": 98,
+   "sampled": 19
+  },
+  "Easy | Genetic Engineering": {
+   "population": 5,
+   "sampled": 1
+  },
+  "Easy | Genetics": {
+   "population": 52,
+   "sampled": 10
+  },
+  "Easy | Geriatrics": {
+   "population": 11,
+   "sampled": 2
+  },
+  "Easy | Health Administration": {
+   "population": 1,
+   "sampled": 0
+  },
+  "Easy | Health System": {
+   "population": 1,
+   "sampled": 0
+  },
+  "Easy | Hematology": {
+   "population": 72,
+   "sampled": 14
+  },
+  "Easy | Immunology": {
+   "population": 5,
+   "sampled": 1
+  },
+  "Easy | Infection Control": {
+   "population": 1,
+   "sampled": 0
+  },
+  "Easy | Infection Diseases": {
+   "population": 1,
+   "sampled": 0
+  },
+  "Easy | Infectious Diseases": {
+   "population": 359,
+   "sampled": 71
+  },
+  "Easy | Internal Medicine": {
+   "population": 42,
+   "sampled": 8
+  },
+  "Easy | Molecular Biology": {
+   "population": 61,
+   "sampled": 12
+  },
+  "Easy | Nephrology": {
+   "population": 65,
+   "sampled": 13
+  },
+  "Easy | Neurology": {
+   "population": 44,
+   "sampled": 9
+  },
+  "Easy | Nuclear Medicine": {
+   "population": 14,
+   "sampled": 3
+  },
+  "Easy | Nursing": {
+   "population": 5,
+   "sampled": 1
+  },
+  "Easy | Nutrition": {
+   "population": 1,
+   "sampled": 0
+  },
+  "Easy | Obstetrics and Gynecology": {
+   "population": 388,
+   "sampled": 77
+  },
+  "Easy | Occupational Medicine": {
+   "population": 4,
+   "sampled": 1
+  },
+  "Easy | Oncology": {
+   "population": 71,
+   "sampled": 14
+  },
+  "Easy | Ophthalmology": {
+   "population": 43,
+   "sampled": 9
+  },
+  "Easy | Oral and Maxillofacial Surgery": {
+   "population": 2,
+   "sampled": 0
+  },
+  "Easy | Orthopedics": {
+   "population": 28,
+   "sampled": 6
+  },
+  "Easy | Other(No Category)": {
+   "population": 2,
+   "sampled": 0
+  },
+  "Easy | Otolaryngology": {
+   "population": 62,
+   "sampled": 12
+  },
+  "Easy | Pain Management": {
+   "population": 2,
+   "sampled": 0
+  },
+  "Easy | Palliative Medicine": {
+   "population": 8,
+   "sampled": 2
+  },
+  "Easy | Parasitology": {
+   "population": 36,
+   "sampled": 7
+  },
+  "Easy | Pathology": {
+   "population": 51,
+   "sampled": 10
+  },
+  "Easy | Pediatrics": {
+   "population": 118,
+   "sampled": 23
+  },
+  "Easy | Periodontology": {
+   "population": 55,
+   "sampled": 11
+  },
+  "Easy | Pharmaceutical": {
+   "population": 1,
+   "sampled": 0
+  },
+  "Easy | Pharmacognosy": {
+   "population": 7,
+   "sampled": 1
+  },
+  "Easy | Pharmacology": {
+   "population": 84,
+   "sampled": 17
+  },
+  "Easy | Physical Medicine and Rehabilitation": {
+   "population": 20,
+   "sampled": 4
+  },
+  "Easy | Physics": {
+   "population": 2,
+   "sampled": 0
+  },
+  "Easy | Physiology": {
+   "population": 2,
+   "sampled": 0
+  },
+  "Easy | Preventive Healthcare": {
+   "population": 17,
+   "sampled": 3
+  },
+  "Easy | Prosthodontics": {
+   "population": 2,
+   "sampled": 0
+  },
+  "Easy | Psychiatry": {
+   "population": 40,
+   "sampled": 8
+  },
+  "Easy | Public Health": {
+   "population": 66,
+   "sampled": 13
+  },
+  "Easy | Pulmonology": {
+   "population": 287,
+   "sampled": 57
+  },
+  "Easy | Radiology": {
+   "population": 33,
+   "sampled": 7
+  },
+  "Easy | Rheumatology": {
+   "population": 13,
+   "sampled": 3
+  },
+  "Easy | Sports Medicine": {
+   "population": 22,
+   "sampled": 4
+  },
+  "Easy | Surgery": {
+   "population": 57,
+   "sampled": 11
+  },
+  "Easy | Toxicology": {
+   "population": 112,
+   "sampled": 22
+  },
+  "Easy | Urology": {
+   "population": 56,
+   "sampled": 11
+  },
+  "Hard | Allergy and Immunology": {
+   "population": 8,
+   "sampled": 2
+  },
+  "Hard | Anesthesiology": {
+   "population": 4,
+   "sampled": 1
+  },
+  "Hard | Biochemistry": {
+   "population": 7,
+   "sampled": 1
+  },
+  "Hard | Cardiology": {
+   "population": 64,
+   "sampled": 13
+  },
+  "Hard | Dentistry": {
+   "population": 1,
+   "sampled": 0
+  },
+  "Hard | Dermatology": {
+   "population": 30,
+   "sampled": 6
+  },
+  "Hard | Eastern Medicine": {
+   "population": 10,
+   "sampled": 2
+  },
+  "Hard | Embryology": {
+   "population": 1,
+   "sampled": 0
+  },
+  "Hard | Emergency Medicine": {
+   "population": 7,
+   "sampled": 1
+  },
+  "Hard | Endocrinology": {
+   "population": 47,
+   "sampled": 9
+  },
+  "Hard | Endodontics": {
+   "population": 25,
+   "sampled": 5
+  },
+  "Hard | Epidemiology": {
+   "population": 1,
+   "sampled": 0
+  },
+  "Hard | Gastroenterology": {
+   "population": 129,
+   "sampled": 26
+  },
+  "Hard | General Medicine": {
+   "population": 12,
+   "sampled": 2
+  },
+  "Hard | Geriatrics": {
+   "population": 4,
+   "sampled": 1
+  },
+  "Hard | Hematology": {
+   "population": 8,
+   "sampled": 2
+  },
+  "Hard | Immunology": {
+   "population": 1,
+   "sampled": 0
+  },
+  "Hard | Infectious Diseases": {
+   "population": 50,
+   "sampled": 10
+  },
+  "Hard | Internal Medicine": {
+   "population": 4,
+   "sampled": 1
+  },
+  "Hard | Nephrology": {
+   "population": 26,
+   "sampled": 5
+  },
+  "Hard | Neurology": {
+   "population": 26,
+   "sampled": 5
+  },
+  "Hard | Neurosurgery": {
+   "population": 1,
+   "sampled": 0
+  },
+  "Hard | Nuclear Medicine": {
+   "population": 2,
+   "sampled": 0
+  },
+  "Hard | Obstetrics and Gynecology": {
+   "population": 329,
+   "sampled": 65
+  },
+  "Hard | Oncology": {
+   "population": 7,
+   "sampled": 1
+  },
+  "Hard | Ophthalmology": {
+   "population": 3,
+   "sampled": 1
+  },
+  "Hard | Orthopedics": {
+   "population": 7,
+   "sampled": 1
+  },
+  "Hard | Otolaryngology": {
+   "population": 9,
+   "sampled": 2
+  },
+  "Hard | Pathology": {
+   "population": 18,
+   "sampled": 4
+  },
+  "Hard | Pediatrics": {
+   "population": 62,
+   "sampled": 12
+  },
+  "Hard | Pharmaceutical": {
+   "population": 1,
+   "sampled": 0
+  },
+  "Hard | Pharmacology": {
+   "population": 14,
+   "sampled": 3
+  },
+  "Hard | Physical Medicine and Rehabilitation": {
+   "population": 2,
+   "sampled": 0
+  },
+  "Hard | Prosthodontics": {
+   "population": 1,
+   "sampled": 0
+  },
+  "Hard | Psychiatry": {
+   "population": 22,
+   "sampled": 4
+  },
+  "Hard | Public Health": {
+   "population": 4,
+   "sampled": 1
+  },
+  "Hard | Pulmonology": {
+   "population": 58,
+   "sampled": 12
+  },
+  "Hard | Radiology": {
+   "population": 11,
+   "sampled": 2
+  },
+  "Hard | Rheumatology": {
+   "population": 16,
+   "sampled": 3
+  },
+  "Hard | Surgery": {
+   "population": 22,
+   "sampled": 4
+  },
+  "Hard | Toxicology": {
+   "population": 32,
+   "sampled": 6
+  },
+  "Hard | Urology": {
+   "population": 27,
+   "sampled": 5
+  },
+  "Hard | Vascular Surgery": {
+   "population": 3,
+   "sampled": 1
+  },
+  "Moderate | Allergy and Immunology": {
+   "population": 41,
+   "sampled": 8
+  },
+  "Moderate | Analytical Chemistry": {
+   "population": 8,
+   "sampled": 2
+  },
+  "Moderate | Anatomy": {
+   "population": 16,
+   "sampled": 3
+  },
+  "Moderate | Anesthesiology": {
+   "population": 52,
+   "sampled": 10
+  },
+  "Moderate | Biochemistry": {
+   "population": 39,
+   "sampled": 8
+  },
+  "Moderate | Cardiology": {
+   "population": 93,
+   "sampled": 18
+  },
+  "Moderate | Cell Biology": {
+   "population": 4,
+   "sampled": 1
+  },
+  "Moderate | Chemistry": {
+   "population": 4,
+   "sampled": 1
+  },
+  "Moderate | Dentistry": {
+   "population": 26,
+   "sampled": 5
+  },
+  "Moderate | Dermatology": {
+   "population": 69,
+   "sampled": 14
+  },
+  "Moderate | Eastern Medicine": {
+   "population": 50,
+   "sampled": 10
+  },
+  "Moderate | Embryology": {
+   "population": 12,
+   "sampled": 2
+  },
+  "Moderate | Emergency Medicine": {
+   "population": 17,
+   "sampled": 3
+  },
+  "Moderate | Endocrinology": {
+   "population": 654,
+   "sampled": 129
+  },
+  "Moderate | Endodontics": {
+   "population": 12,
+   "sampled": 2
+  },
+  "Moderate | Gastroenterology": {
+   "population": 591,
+   "sampled": 117
+  },
+  "Moderate | General Medicine": {
+   "population": 80,
+   "sampled": 16
+  },
+  "Moderate | Genetics": {
+   "population": 12,
+   "sampled": 2
+  },
+  "Moderate | Geriatrics": {
+   "population": 22,
+   "sampled": 4
+  },
+  "Moderate | Health Economics": {
+   "population": 1,
+   "sampled": 0
+  },
+  "Moderate | Hematology": {
+   "population": 91,
+   "sampled": 18
+  },
+  "Moderate | Hepatology": {
+   "population": 1,
+   "sampled": 0
+  },
+  "Moderate | Immunology": {
+   "population": 4,
+   "sampled": 1
+  },
+  "Moderate | Infection Control": {
+   "population": 1,
+   "sampled": 0
+  },
+  "Moderate | Infection Diseases": {
+   "population": 1,
+   "sampled": 0
+  },
+  "Moderate | Infectious Diseases": {
+   "population": 385,
+   "sampled": 76
+  },
+  "Moderate | Internal Medicine": {
+   "population": 48,
+   "sampled": 10
+  },
+  "Moderate | Medical Ethics": {
+   "population": 1,
+   "sampled": 0
+  },
+  "Moderate | Medical Genetics": {
+   "population": 1,
+   "sampled": 0
+  },
+  "Moderate | Microbiology": {
+   "population": 1,
+   "sampled": 0
+  },
+  "Moderate | Molecular Biology": {
+   "population": 9,
+   "sampled": 2
+  },
+  "Moderate | Nephrology": {
+   "population": 173,
+   "sampled": 34
+  },
+  "Moderate | Neurology": {
+   "population": 126,
+   "sampled": 25
+  },
+  "Moderate | Nuclear Medicine": {
+   "population": 16,
+   "sampled": 3
+  },
+  "Moderate | Nursing": {
+   "population": 1,
+   "sampled": 0
+  },
+  "Moderate | Nutrition": {
+   "population": 2,
+   "sampled": 0
+  },
+  "Moderate | Obstetrics and Gynecology": {
+   "population": 1087,
+   "sampled": 215
+  },
+  "Moderate | Occupational Medicine": {
+   "population": 2,
+   "sampled": 0
+  },
+  "Moderate | Oncology": {
+   "population": 126,
+   "sampled": 25
+  },
+  "Moderate | Ophthalmology": {
+   "population": 37,
+   "sampled": 7
+  },
+  "Moderate | Oral and Maxillofacial Surgery": {
+   "population": 1,
+   "sampled": 0
+  },
+  "Moderate | Orthopedics": {
+   "population": 63,
+   "sampled": 13
+  },
+  "Moderate | Otolaryngology": {
+   "population": 95,
+   "sampled": 19
+  },
+  "Moderate | Palliative Medicine": {
+   "population": 8,
+   "sampled": 2
+  },
+  "Moderate | Parasitology": {
+   "population": 22,
+   "sampled": 4
+  },
+  "Moderate | Pathology": {
+   "population": 58,
+   "sampled": 12
+  },
+  "Moderate | Pediatrics": {
+   "population": 129,
+   "sampled": 26
+  },
+  "Moderate | Periodontology": {
+   "population": 31,
+   "sampled": 6
+  },
+  "Moderate | Pharmaceutical": {
+   "population": 1,
+   "sampled": 0
+  },
+  "Moderate | Pharmacognosy": {
+   "population": 5,
+   "sampled": 1
+  },
+  "Moderate | Pharmacology": {
+   "population": 96,
+   "sampled": 19
+  },
+  "Moderate | Physical Medicine and Rehabilitation": {
+   "population": 45,
+   "sampled": 9
+  },
+  "Moderate | Physics": {
+   "population": 1,
+   "sampled": 0
+  },
+  "Moderate | Physiology": {
+   "population": 5,
+   "sampled": 1
+  },
+  "Moderate | Preventive Healthcare": {
+   "population": 9,
+   "sampled": 2
+  },
+  "Moderate | Psychiatry": {
+   "population": 69,
+   "sampled": 14
+  },
+  "Moderate | Public Health": {
+   "population": 56,
+   "sampled": 11
+  },
+  "Moderate | Pulmonology": {
+   "population": 662,
+   "sampled": 131
+  },
+  "Moderate | Radiology": {
+   "population": 90,
+   "sampled": 18
+  },
+  "Moderate | Research": {
+   "population": 1,
+   "sampled": 0
+  },
+  "Moderate | Rheumatology": {
+   "population": 42,
+   "sampled": 8
+  },
+  "Moderate | Sports Medicine": {
+   "population": 9,
+   "sampled": 2
+  },
+  "Moderate | Surgery": {
+   "population": 75,
+   "sampled": 15
+  },
+  "Moderate | Toxicology": {
+   "population": 126,
+   "sampled": 25
+  },
+  "Moderate | Urology": {
+   "population": 111,
+   "sampled": 22
+  },
+  "Moderate | Veterinary Medicine": {
+   "population": 1,
+   "sampled": 0
+  }
+ },
+ "marginals_pct": {
+  "difficulty_3level": {
+   "population": {
+    "Moderate": 56.48,
+    "Easy": 32.51,
+    "Hard": 11.01
+   },
+   "subset": {
+    "Moderate": 56.55,
+    "Easy": 32.5,
+    "Hard": 10.95
+   }
+  },
+  "difficulty_raw": {
+   "population": {
+    "Medium": 56.48,
+    "Easy": 32.51,
+    "Challenging": 10.17,
+    "Hard": 0.84
+   },
+   "subset": {
+    "Medium": 56.55,
+    "Easy": 32.5,
+    "Challenging": 10.35,
+    "Hard": 0.6
+   }
+  },
+  "first_specialty": {
+   "population": {
+    "Obstetrics and Gynecology": 17.79,
+    "Gastroenterology": 10.04,
+    "Pulmonology": 9.93,
+    "Endocrinology": 8.46,
+    "Infectious Diseases": 7.83,
+    "Pediatrics": 3.05,
+    "Toxicology": 2.66,
+    "Nephrology": 2.6,
+    "Oncology": 2.01,
+    "Neurology": 1.93,
+    "Urology": 1.91,
+    "Pharmacology": 1.91,
+    "General Medicine": 1.87,
+    "Cardiology": 1.8,
+    "Hematology": 1.69,
+    "Otolaryngology": 1.64,
+    "Surgery": 1.52,
+    "Dermatology": 1.37,
+    "Radiology": 1.32,
+    "Psychiatry": 1.29,
+    "Pathology": 1.25,
+    "Public Health": 1.24,
+    "Orthopedics": 0.97,
+    "Allergy and Immunology": 0.95,
+    "Internal Medicine": 0.93,
+    "Eastern Medicine": 0.9,
+    "Periodontology": 0.85,
+    "Ophthalmology": 0.82,
+    "Anesthesiology": 0.74,
+    "Rheumatology": 0.7,
+    "Dentistry": 0.69,
+    "Molecular Biology": 0.69,
+    "Physical Medicine and Rehabilitation": 0.66,
+    "Biochemistry": 0.65,
+    "Genetics": 0.63,
+    "Parasitology": 0.57,
+    "Anatomy": 0.38,
+    "Endodontics": 0.38,
+    "Geriatrics": 0.36,
+    "Emergency Medicine": 0.32,
+    "Nuclear Medicine": 0.32,
+    "Embryology": 0.32,
+    "Sports Medicine": 0.31,
+    "Preventive Healthcare": 0.26,
+    "Analytical Chemistry": 0.18,
+    "Chemistry": 0.16,
+    "Palliative Medicine": 0.16,
+    "Pharmacognosy": 0.12,
+    "Cell Biology": 0.12,
+    "Immunology": 0.1,
+    "Physiology": 0.07,
+    "Occupational Medicine": 0.06,
+    "Nursing": 0.06,
+    "Genetic Engineering": 0.05,
+    "Pharmaceutical": 0.03,
+    "Physics": 0.03,
+    "Prosthodontics": 0.03,
+    "Oral and Maxillofacial Surgery": 0.03,
+    "Vascular Surgery": 0.03,
+    "Nutrition": 0.03,
+    "Pain Management": 0.02,
+    "Infection Control": 0.02,
+    "": 0.02,
+    "Infection Diseases": 0.02,
+    "Other(No Category)": 0.02,
+    "Veterinary Medicine": 0.01,
+    "Medical Genetics": 0.01,
+    "Epidemiology": 0.01,
+    "Health Administration": 0.01,
+    "Botany": 0.01,
+    "Health System": 0.01,
+    "Medical Ethics": 0.01,
+    "Neurosurgery": 0.01,
+    "Health Economics": 0.01,
+    "Hepatology": 0.01,
+    "Microbiology": 0.01,
+    "Research": 0.01,
+    "Forensic Medicine": 0.01
+   },
+   "subset": {
+    "Obstetrics and Gynecology": 17.85,
+    "Gastroenterology": 10.1,
+    "Pulmonology": 10.0,
+    "Endocrinology": 8.45,
+    "Infectious Diseases": 7.85,
+    "Pediatrics": 3.05,
+    "Toxicology": 2.65,
+    "Nephrology": 2.6,
+    "Oncology": 2.0,
+    "Pharmacology": 1.95,
+    "Neurology": 1.95,
+    "Urology": 1.9,
+    "General Medicine": 1.85,
+    "Cardiology": 1.8,
+    "Hematology": 1.7,
+    "Otolaryngology": 1.65,
+    "Surgery": 1.5,
+    "Dermatology": 1.4,
+    "Radiology": 1.35,
+    "Pathology": 1.3,
+    "Psychiatry": 1.3,
+    "Public Health": 1.25,
+    "Orthopedics": 1.0,
+    "Internal Medicine": 0.95,
+    "Allergy and Immunology": 0.95,
+    "Eastern Medicine": 0.9,
+    "Ophthalmology": 0.85,
+    "Periodontology": 0.85,
+    "Anesthesiology": 0.75,
+    "Rheumatology": 0.7,
+    "Molecular Biology": 0.7,
+    "Dentistry": 0.7,
+    "Biochemistry": 0.65,
+    "Physical Medicine and Rehabilitation": 0.65,
+    "Genetics": 0.6,
+    "Parasitology": 0.55,
+    "Anatomy": 0.4,
+    "Endodontics": 0.35,
+    "Geriatrics": 0.35,
+    "Emergency Medicine": 0.3,
+    "Nuclear Medicine": 0.3,
+    "Embryology": 0.3,
+    "Sports Medicine": 0.3,
+    "Preventive Healthcare": 0.25,
+    "Analytical Chemistry": 0.2,
+    "Palliative Medicine": 0.2,
+    "Cell Biology": 0.15,
+    "Chemistry": 0.15,
+    "Pharmacognosy": 0.1,
+    "Immunology": 0.1,
+    "Physiology": 0.05,
+    "Occupational Medicine": 0.05,
+    "Genetic Engineering": 0.05,
+    "Vascular Surgery": 0.05,
+    "Nursing": 0.05,
+    "": 0.05
+   }
+  },
+  "all_specialty_labels": {
+   "population": {
+    "Obstetrics and Gynecology": 10.52,
+    "Gastroenterology": 9.38,
+    "Infectious Diseases": 7.8,
+    "Pulmonology": 7.55,
+    "Endocrinology": 5.85,
+    "Pathology": 3.54,
+    "Oncology": 3.42,
+    "Pediatrics": 3.33,
+    "Pharmacology": 2.74,
+    "Radiology": 2.54,
+    "General Medicine": 2.44,
+    "Nephrology": 2.31,
+    "Surgery": 2.3,
+    "Internal Medicine": 2.28,
+    "Urology": 2.27,
+    "Neurology": 2.08,
+    "Toxicology": 1.87,
+    "Hematology": 1.73,
+    "Cardiology": 1.34,
+    "Preventive Healthcare": 1.33,
+    "Public Health": 1.25,
+    "Otolaryngology": 1.22,
+    "Eastern Medicine": 1.16,
+    "Emergency Medicine": 1.13,
+    "Allergy and Immunology": 1.09,
+    "Orthopedics": 1.02,
+    "Dermatology": 1.0,
+    "Psychiatry": 0.94,
+    "Genetics": 0.84,
+    "Physical Medicine and Rehabilitation": 0.71,
+    "Rheumatology": 0.68,
+    "Geriatrics": 0.67,
+    "Ophthalmology": 0.64,
+    "Anatomy": 0.62,
+    "Anesthesiology": 0.59,
+    "Biochemistry": 0.54,
+    "Physiology": 0.53,
+    "Dentistry": 0.53,
+    "Periodontology": 0.51,
+    "Cell Biology": 0.48,
+    "Parasitology": 0.46,
+    "Sports Medicine": 0.42,
+    "Palliative Medicine": 0.4,
+    "Nuclear Medicine": 0.4,
+    "Molecular Biology": 0.37,
+    "Chemistry": 0.3,
+    "Embryology": 0.3,
+    "Veterinary Medicine": 0.29,
+    "Analytical Chemistry": 0.25,
+    "Environmental Health": 0.25,
+    "Endodontics": 0.22,
+    "Neurosurgery": 0.21,
+    "Microbiology": 0.2,
+    "Immunology": 0.19,
+    "Laboratory Medicine": 0.19,
+    "Pain Management": 0.17,
+    "Epidemiology": 0.16,
+    "Nutrition": 0.14,
+    "Medical Microbiology": 0.13,
+    "Hepatology": 0.13,
+    "Virology": 0.12,
+    "Occupational Medicine": 0.12,
+    "Other(No Category)": 0.1,
+    "Vascular Surgery": 0.1,
+    "Addiction Medicine": 0.1,
+    "Neonatology": 0.09,
+    "FDA": 0.09,
+    "Nursing": 0.08,
+    "Histology": 0.08,
+    "Audiology": 0.07,
+    "Communication Skills": 0.06,
+    "Pharmacognosy": 0.06,
+    "Botany": 0.06,
+    "Physics": 0.06,
+    "History of Medicine": 0.05,
+    "Oral and Maxillofacial Surgery": 0.04,
+    "Reproductive Medicine": 0.04,
+    "Health Management": 0.04,
+    "Periodontics": 0.03,
+    "Medical Genetics": 0.03,
+    "Diagnosis": 0.03,
+    "Occupational Health": 0.03,
+    "Genetic Engineering": 0.03,
+    "Forensic Medicine": 0.03,
+    "Critical Care": 0.03,
+    "Infection Control": 0.02,
+    "General Dentistry": 0.02,
+    "Health Economics": 0.02,
+    "Sociology": 0.02,
+    "Diagnostic Medicine": 0.02,
+    "Vascular Medicine": 0.02,
+    "Preventive Medicine": 0.02,
+    "Pharmaceutical": 0.02,
+    "Medical Toxicology": 0.02,
+    "Demographics": 0.02,
+    "Intensive Care": 0.02,
+    "Prosthodontics": 0.02,
+    "Teratology": 0.02,
+    "Electrocardiography": 0.02,
+    "Diagnostic Testing": 0.02,
+    "Hypertension": 0.02,
+    "Interventional Cardiology": 0.02,
+    "Classification": 0.01,
+    "Medical Ethics": 0.01,
+    "Risk Assessment": 0.01,
+    "Physical Examination": 0.01,
+    "": 0.01,
+    "Transfusion Medicine": 0.01,
+    "Infection Diseases": 0.01,
+    "\"Endocrinology": 0.01,
+    "Internal Medicine\"": 0.01,
+    "Industrial Chemistry": 0.01,
+    "Intensive Care Medicine": 0.01,
+    "Health Administration": 0.01,
+    "Entomology": 0.01,
+    "Health System": 0.01,
+    "Family Planning": 0.01,
+    "Patient Safety": 0.01,
+    "Speech-Language Pathology": 0.01,
+    "Health Policy": 0.01,
+    "Cellular Biology": 0.01,
+    "Transplant": 0.01,
+    "Clinical Research": 0.01,
+    "Research": 0.01,
+    "Etiology": 0.01,
+    "Genetic": 0.01,
+    "Family Medicine": 0.01,
+    "Genetic Disorders": 0.01,
+    "Accident and Emergency": 0.01
+   },
+   "subset": {
+    "Obstetrics and Gynecology": 10.43,
+    "Gastroenterology": 9.66,
+    "Infectious Diseases": 7.78,
+    "Pulmonology": 7.7,
+    "Endocrinology": 6.06,
+    "Pediatrics": 3.6,
+    "Oncology": 3.47,
+    "Pathology": 3.47,
+    "Pharmacology": 2.88,
+    "Radiology": 2.43,
+    "Surgery": 2.41,
+    "Nephrology": 2.33,
+    "Internal Medicine": 2.28,
+    "General Medicine": 2.25,
+    "Neurology": 2.12,
+    "Toxicology": 2.01,
+    "Urology": 1.93,
+    "Hematology": 1.85,
+    "Cardiology": 1.38,
+    "Preventive Healthcare": 1.3,
+    "Eastern Medicine": 1.3,
+    "Otolaryngology": 1.22,
+    "Emergency Medicine": 1.22,
+    "Public Health": 1.19,
+    "Allergy and Immunology": 1.08,
+    "Dermatology": 0.95,
+    "Orthopedics": 0.93,
+    "Psychiatry": 0.9,
+    "Physiology": 0.74,
+    "Genetics": 0.71,
+    "Ophthalmology": 0.66,
+    "Anesthesiology": 0.66,
+    "Anatomy": 0.61,
+    "Biochemistry": 0.61,
+    "Rheumatology": 0.56,
+    "Physical Medicine and Rehabilitation": 0.56,
+    "Periodontology": 0.56,
+    "Dentistry": 0.48,
+    "Veterinary Medicine": 0.45,
+    "Palliative Medicine": 0.45,
+    "Geriatrics": 0.42,
+    "Nuclear Medicine": 0.42,
+    "Cell Biology": 0.4,
+    "Parasitology": 0.4,
+    "Molecular Biology": 0.37,
+    "Sports Medicine": 0.37,
+    "Environmental Health": 0.32,
+    "Chemistry": 0.32,
+    "Analytical Chemistry": 0.29,
+    "Embryology": 0.26,
+    "Pain Management": 0.26,
+    "Immunology": 0.21,
+    "Microbiology": 0.21,
+    "Endodontics": 0.19,
+    "Vascular Surgery": 0.16,
+    "FDA": 0.16,
+    "Botany": 0.13,
+    "Virology": 0.13,
+    "Neurosurgery": 0.13,
+    "Epidemiology": 0.11,
+    "Laboratory Medicine": 0.11,
+    "Histology": 0.11,
+    "Communication Skills": 0.08,
+    "Addiction Medicine": 0.08,
+    "Audiology": 0.08,
+    "Nursing": 0.08,
+    "Other(No Category)": 0.05,
+    "Pharmacognosy": 0.05,
+    "Physics": 0.05,
+    "Medical Microbiology": 0.05,
+    "Teratology": 0.05,
+    "Hepatology": 0.05,
+    "Sociology": 0.05,
+    "Hypertension": 0.05,
+    "Diagnosis": 0.05,
+    "Industrial Chemistry": 0.03,
+    "Infection Control": 0.03,
+    "Periodontics": 0.03,
+    "Reproductive Medicine": 0.03,
+    "Demographics": 0.03,
+    "Medical Genetics": 0.03,
+    "Risk Assessment": 0.03,
+    "Physical Examination": 0.03,
+    "Family Planning": 0.03,
+    "Speech-Language Pathology": 0.03,
+    "Occupational Medicine": 0.03,
+    "Genetic Engineering": 0.03,
+    "Diagnostic Medicine": 0.03,
+    "Transplant": 0.03,
+    "Health Management": 0.03,
+    "Vascular Medicine": 0.03,
+    "Nutrition": 0.03,
+    "Critical Care": 0.03,
+    "History of Medicine": 0.03,
+    "Genetic Disorders": 0.03,
+    "Interventional Cardiology": 0.03,
+    "": 0.03
+   }
+  },
+  "gold_letter": {
+   "population": {
+    "A": 28.52,
+    "D": 24.79,
+    "B": 24.03,
+    "C": 22.66
+   },
+   "subset": {
+    "A": 29.15,
+    "B": 24.3,
+    "C": 23.4,
+    "D": 23.15
+   }
+  }
+ }
+}
