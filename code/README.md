@@ -123,19 +123,39 @@ The runner prints warnings for the `_vi` fallbacks. These fallbacks are not infe
 
 ## Answer extraction
 
-`infrastructure.llm_client.parse_answer()` receives each question's option count. It strips thinking blocks and uses the `explicit-answer-v1` policy:
+`infrastructure.llm_client.parse_answer()` receives each question's option count and delegates to
+`infrastructure.vote_extraction.extract_vote()` (policy `last-explicit-v1`, recorded in every manifest as
+`answer_parser_version`). It implements the vote-extraction rule of the paper (Section 3.6): the option
+label is the **last explicit, non-negated statement of an answer** in the output. Thinking blocks and
+Markdown emphasis are ignored.
 
-1. An explicit final-answer declaration takes priority; the last final declaration can revise an earlier provisional answer.
-2. Otherwise, explicit answer declarations and standalone first/last answer lines must agree.
-3. A concluding selection such as `Therefore, option A ...` is checked for conflicts with other answer declarations.
-4. An unambiguous bold or parenthesized label is supported as a fallback.
-5. Unresolved choices, invalid/out-of-range labels, or conflicting declarations return `None` (`null` in JSON).
+Statements that count:
 
-The parser does not pick a letter just because it appears last in an option-by-option explanation. It never consults the gold answer to resolve a conflict. Zero-shot requests a single character, but its prompt is not a decoding constraint; raw output may include explanations.
+1. A declaration: `the (correct/best/final) answer is X`, `my final answer remains X`, `Answer: X`,
+   `đáp án (đúng) là X`, `Conclusion X`, `I choose/maintain/select X`.
+2. A verdict on a letter: `option X is the correct answer / the best choice / the most appropriate`.
+3. A letter followed by its option text in an answering sentence (`the most likely pathogen is B. Coxsackie A virus`).
+4. A line that is only a label (`B`, `(B)`, `B. text`, `Option B`).
 
-For example, `A` on the first line followed by discussion of option D still selects A. `The correct answer is B ... Therefore, option A ...` is ambiguous unless a final answer resolves it. A null answer counts as incorrect in full-dataset accuracy.
+Not statements: entries of a restated option list, `(option D) should be considered`, abbreviations such as
+`C. difficile`, the article `a` (`the answer is a beta-blocker`), and anything negated (`option A is incorrect`).
+When the last statement names two options (`A or B`), a label outside the option range, or no statement exists,
+the result is `None` (`null` in JSON; counted as incorrect in accuracy). The gold answer is never consulted.
 
-Changing the parser changes scoring. Identify parser versions in manifests, retain raw responses, and record any offline reprocessing. For multi-agent methods, offline parsing changes cannot recreate the subsequent model messages that different intermediate choices would have produced.
+`extract_vote(text, n_options, options)` can additionally fall back to the option *text* when no letter statement
+exists. The framework code is frozen and calls `parse_answer(raw, n_options=...)` without options, so this fallback is
+not part of the run-time parser; it is only available to offline analysis and to new framework files.
+
+On the stored Llama-3.3-70B MedQA-USMLE runs (3 seeds) the earlier run-time parser returned no vote for 7.7% of
+analyses and 18.8% of revisions; `last-explicit-v1` leaves 2.85% and 1.22% without a vote (0.99% and 0.60% with the
+option-text fallback) and agrees with the earlier parser in 99.9% of the cases where both return a vote.
+
+Changing the parser changes scoring, and runs made with `explicit-answer-v1` are not comparable with
+`last-explicit-v1` runs at the vote level. Retain raw responses and record any offline reprocessing. For multi-agent
+methods, offline parsing changes cannot recreate the later model messages that different intermediate labels would
+have produced.
+
+Zero-shot requests a single character, but its prompt is not a decoding constraint; raw output may include explanations.
 
 ## Result routing and files
 
@@ -165,6 +185,7 @@ Slashes and periods in model keys are replaced with underscores. JSONL records a
 | `difficulty`, `topic` | Dataset labels, or null when absent |
 | `api_calls`, `n_llm_calls` | Framework and client call counters |
 | `tokens_in`, `tokens_out`, `n_usage_missing` | Token usage and missing-usage count |
+| `finish_reasons` | Why each model call stopped, in call order (`stop`, `length` = hit the output limit, or null); same length as `n_llm_calls`. Present from parser `last-explicit-v1` on; older files lack it |
 | `individual_votes`, `round1_answers` | Sampling/agent votes where applicable |
 | `audit_trail` | Step details and preserved raw model output |
 | `timestamp` | Original result timestamp |
@@ -175,7 +196,7 @@ After the configured seeds, the terminal prints mean accuracy and sample standar
 
 ## Metrics and checks
 
-Check that each seed has the expected question count, unique IDs, `api_calls == n_llm_calls`, and `n_usage_missing == 0`. If usage is missing, the recorded token total is only a lower bound. Do not count repeated seeds for a question as independent questions in significance tests.
+Check that each seed has the expected question count, unique IDs, `api_calls == n_llm_calls`, `len(finish_reasons) == n_llm_calls` (newer files) and `n_usage_missing == 0`. If usage is missing, the recorded token total is only a lower bound. Do not count repeated seeds for a question as independent questions in significance tests.
 
 Accuracy, sampling Pass@k, collaboration metrics, and answer distributions accept A-E. Agent votes within one multi-agent run are not independent sampling attempts for Pass@k. For datasets outside the built-in VM14K sizes, metric readers use `n_samples` from the runner manifest to determine complete seeds.
 

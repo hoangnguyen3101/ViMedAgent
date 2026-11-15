@@ -27,13 +27,14 @@ class AnswerParsingTests(unittest.TestCase):
         self.assertEqual(parse_answer("Final answer: A\nCorrection. Final answer is D."), "D")
         self.assertEqual(parse_answer("Final answer would be C."), "C")
 
-    def test_contradictory_declarations_are_ambiguous(self):
-        examples = ["The answer is A.\nThe correct answer is B.",
-                    "A\nThe correct answer is B.",
-                    "The correct answer is B.\nTherefore, option A (Hypoperfusion) should be treated first."]
-        for raw in examples:
+    def test_last_explicit_statement_decides_between_contradictory_declarations(self):
+        # Paper Section 3.6: the last explicit, non-negated statement of an answer is the vote.
+        examples = {"The answer is A.\nThe correct answer is B.": "B",
+                    "A\nThe correct answer is B.": "B",
+                    "The correct answer is B.\nTherefore, option A (Hypoperfusion) should be treated first.": "B"}
+        for raw, want in examples.items():
             with self.subTest(raw=raw):
-                self.assertIsNone(parse_answer(raw))
+                self.assertEqual(parse_answer(raw), want)
 
     def test_repeated_consistent_declarations_are_accepted(self):
         self.assertEqual(parse_answer("B\nThe correct answer is B.\nTherefore, option B is appropriate."), "B")

@@ -6,6 +6,8 @@ code/results/
 code/results_test/
 code/results_USMLE/
 code/results_ablation/
+# bản copy/đồng bộ kết quả USMLE ở gốc repo (cùng nội dung với code/results_USMLE/)
+/results_USMLE/
 # Result archives (results*.zip, 0.2–0.9 GB each)
 code/results*.zip
 

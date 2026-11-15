@@ -43,6 +43,7 @@ def reset_usage() -> None:
     _usage.tokens_out = 0
     _usage.n_calls = 0
     _usage.n_missing = 0
+    _usage.finish_reasons = []
 
 
 def get_usage() -> dict:
@@ -56,11 +57,18 @@ def get_usage() -> dict:
         "tokens_out": getattr(_usage, "tokens_out", 0),
         "n_llm_calls": getattr(_usage, "n_calls", 0),
         "n_usage_missing": getattr(_usage, "n_missing", 0),
+        # Why each call stopped, in call order ("stop" / "length" = hit max_tokens / None if the
+        # server did not say). len == n_llm_calls. Lets every framework report truncation without
+        # reading get_last_call() itself.
+        "finish_reasons": list(getattr(_usage, "finish_reasons", [])),
     }
 
 
-def _add_usage(tin, tout) -> None:
+def _add_usage(tin, tout, finish_reason=None) -> None:
     _usage.n_calls = getattr(_usage, "n_calls", 0) + 1
+    if not hasattr(_usage, "finish_reasons"):
+        _usage.finish_reasons = []
+    _usage.finish_reasons.append(finish_reason)
     if tin is None and tout is None:
         _usage.n_missing = getattr(_usage, "n_missing", 0) + 1
         return
@@ -135,7 +143,7 @@ def _call_ollama_native(
     with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
         data = json.loads(resp.read())
     # Ollama native đặt tên khác OpenAI: prompt_eval_count / eval_count.
-    _add_usage(data.get("prompt_eval_count"), data.get("eval_count"))
+    _add_usage(data.get("prompt_eval_count"), data.get("eval_count"), data.get("done_reason"))
     _last.info = {"tokens_in": data.get("prompt_eval_count"), "tokens_out": data.get("eval_count"),
                   "finish_reason": data.get("done_reason")}
     return data["message"]["content"].strip()
@@ -211,9 +219,10 @@ def call_llm(
             u = getattr(resp, "usage", None)
             tin = getattr(u, "prompt_tokens", None) if u else None
             tout = getattr(u, "completion_tokens", None) if u else None
-            _add_usage(tin, tout)
+            finish = getattr(resp.choices[0], "finish_reason", None)
+            _add_usage(tin, tout, finish)
             _last.info = {**call_info, "tokens_in": tin, "tokens_out": tout,
-                          "finish_reason": getattr(resp.choices[0], "finish_reason", None)}
+                          "finish_reason": finish}
             content = resp.choices[0].message.content
             return (content or "").strip()
 
@@ -237,93 +246,13 @@ def call_llm(
     return ""
 
 
-ANSWER_PARSER_VERSION = "explicit-answer-v1"
+from infrastructure.vote_extraction import extract_vote, VERSION as ANSWER_PARSER_VERSION
 
 
 def parse_answer(text: str, n_options: int = 4) -> str | None:
     """
-    Extract a label from model output (A-D, or A-E for five options).
-    Prefer a final-answer declaration, then consistent answer declarations or
-    standalone answer lines. Conflicting declarations, out-of-range labels and
-    option discussion without an answer return None. Never consult the gold.
+    Option label of a model output: the last explicit, non-negated statement of an answer
+    (paper Section 3.6; see infrastructure/vote_extraction.py). Unresolved "A or B", labels
+    outside the option range and outputs that state no answer return None. Never consults the gold.
     """
-    letters = choice_letters(n_options)
-    if not text:
-        return None
-    # An unfinished thinking block contains no visible final answer either.
-    text = re.sub(r'<think>.*?(?:</think>|$)', '', text,
-                  flags=re.DOTALL | re.IGNORECASE).strip()
-    if not text:
-        return None
-    plain = re.sub(r'[*_`]', '', text)
-    # Capture even out-of-range letters so "Final answer: E" on a four-option
-    # question cannot silently fall back to an A-D mention in the explanation.
-    label = r'[\(\[\"\']?([A-Za-z])[\)\]\"\']?(?!\w)'
-
-    def value(match) -> str | None:
-        letter = match.group(1)
-        suffix = plain[match.end():]
-        # "answer is a beta-blocker" contains an article, not a label.
-        if letter == 'a' and re.match(r'\s+\w', suffix):
-            return None
-        # An unresolved "A or B" / "A/B" is not a single selected option.
-        if re.match(r'\s*(?:or\b|and\b|/|,)\s*\(?[A-Za-z]\)?(?!\w)',
-                    suffix, re.IGNORECASE):
-            return None
-        return letter.upper() if letter.upper() in letters else None
-
-    final = list(re.finditer(
-        r'\bfinal\s+answer\b\s*(?:(?:is|would\s+be)\b\s*)?[:：=\-]?\s*' + label,
-        plain, re.IGNORECASE,
-    ))
-    if final:
-        # An explicit final answer may revise an earlier provisional answer.
-        return value(final[-1])
-
-    candidates = []
-    declarations = re.finditer(
-        r'(?:\b(?:the\s+)?(?:(?:correct|best)\s+)?answer\b'
-        r'\s*(?:(?:is|would\s+be)\b\s*)?[:：=\-]?\s*'
-        r'|đáp\s+án\s*(?:đúng\s*)?(?:là\s*)?[:：=\-]?\s*'
-        r'|\bconclusion\b\s*[:：=\-]?\s*)' + label,
-        plain, re.IGNORECASE,
-    )
-    for match in declarations:
-        # Reject prose articles without blocking a later real declaration.
-        if match.group(1) == 'a' and re.match(r'\s+\w', plain[match.end():]):
-            continue
-        candidates.append(value(match))
-
-    # Bare labels on the first/last non-empty line are direct answers. Labels
-    # such as "Option D (...)" inside an explanation are deliberately ignored.
-    lines = [line.strip() for line in plain.splitlines() if line.strip()]
-    for line in (lines[0], lines[-1]):
-        match = re.fullmatch(label + r'[.!]?', line)
-        if match:
-            letter = match.group(1).upper()
-            candidates.append(letter if letter in letters else None)
-
-    # Explicit concluding choices can expose contradictory model output:
-    # "The correct answer is B. ... Therefore, option A ..." is ambiguous.
-    conclusions = re.finditer(
-        r'\b(?:therefore|thus|hence|in\s+conclusion)\b\s*[:,]?\s*'
-        r'(?:option\s+|I\s+(?:choose|select)\s+)' + label,
-        plain, re.IGNORECASE,
-    )
-    for match in conclusions:
-        suffix = plain[match.end():]
-        if re.match(r'\s*(?:\([^)]*\)\s*)?(?:(?:is|would\s+be)\s+)?'
-                    r'(?:not|incorrect|wrong|excluded|ruled\s+out)\b', suffix, re.IGNORECASE):
-            continue
-        candidates.append(value(match))
-
-    if candidates:
-        return candidates[0] if None not in candidates and len(set(candidates)) == 1 else None
-
-    # Retain unambiguous formatted labels, without choosing the first one in
-    # an option-by-option discussion. No arbitrary last-letter fallback.
-    formatted = re.findall(r'\*\*([A-Z])\*\*|\(([A-Z])\)', text)
-    labels = {bold or paren for bold, paren in formatted}
-    if len(labels) == 1 and labels <= set(letters):
-        return labels.pop()
-    return None
+    return extract_vote(text, n_options)

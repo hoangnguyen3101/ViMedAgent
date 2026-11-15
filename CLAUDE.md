@@ -54,7 +54,7 @@ paper" lần nữa nếu không được yêu cầu rõ ràng.
 
 ```
 id · seed · framework · model · gold · answer · correct · difficulty · topic
-api_calls · tokens_in · tokens_out · n_llm_calls · n_usage_missing
+api_calls · tokens_in · tokens_out · n_llm_calls · n_usage_missing · finish_reasons
 individual_votes · round1_answers · audit_trail · timestamp
 + <file>.jsonl.meta.json  (manifest cấu hình lần chạy)
 ```
@@ -65,6 +65,7 @@ Nơi tiêu thụ schema: `../Table_and_fig/code/table/build_matrix.py`.
 Hai bất biến đáng tin:
 - `api_calls == n_llm_calls` (framework tự đếm vs client đếm, độc lập nhau) — lệch nghĩa là có lời gọi lọt sổ.
 - `n_usage_missing > 0` → `tokens_in/out` chỉ là **cận dưới**, không được báo cáo chi phí.
+- `finish_reasons` (thêm 15/11/2026, cùng lúc đổi parser sang `last-explicit-v1`): lý do dừng của từng lời gọi, theo thứ tự gọi; `len == n_llm_calls`; `"length"` = chạm giới hạn token. File cũ không có trường này.
 
 ## 5. Ba điểm lệch phải khai trong Methods
 
