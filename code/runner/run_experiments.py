@@ -50,8 +50,45 @@ from frameworks import (
 from frameworks.tier3.medagents_ablation import (
     run_medagents_hetero, run_medagents_noreport, HETERO_PANEL, NOREPORT_CONSULT_INPUT,
 )
+from frameworks.tier3.medagents_reextract import (
+    run_medagents_reextract, check_source_trail, REUSED_CALLS, LIVE_CALLS,
+)
 from metrics.compute import compute_pass_at_1, compute_mean_std
 from data.loading import load_dataset
+
+
+# ── Source rows for medagents_reextract ───────────────────
+# (model, seed) -> {id: audit_trail of the stored `medagents` row}. Filled by run_one_seed.
+_SOURCE_TRAILS: dict = {}
+
+
+def source_medagents_path(model: str, dataset_stem: str, seed: int) -> str:
+    """The stored plain-medagents file whose Steps 1-2 medagents_reextract replays."""
+    return result_path("medagents", model, dataset_stem, seed)
+
+
+def load_source_trails(path: str) -> dict:
+    """{id: audit_trail} of a stored medagents file; every row must be a complete 9-call row."""
+    trails = {}
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if row["id"] in trails:
+                raise ValueError(f"{path}: duplicate id {row['id']}")
+            check_source_trail(row["audit_trail"])
+            trails[row["id"]] = row["audit_trail"]
+    return trails
+
+
+def _file_sha256(path: str) -> str:
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
 
 
 # ── Framework dispatch ────────────────────────────────────
@@ -100,6 +137,11 @@ def dispatch(framework: str, sample: dict, model: str, seed: int) -> dict:
         return run_medagents_hetero(q, opts, model)
     elif framework == "medagents_noreport":
         return run_medagents_noreport(q, opts, model)
+    elif framework == "medagents_reextract":
+        trails = _SOURCE_TRAILS.get((model, seed))
+        if trails is None or sample["id"] not in trails:
+            raise KeyError(f"no stored medagents row for id {sample['id']} (model={model}, seed={seed})")
+        return run_medagents_reextract(q, opts, model, trails[sample["id"]])
     else:
         raise ValueError(f"Unknown framework: {framework!r}")
 
@@ -216,6 +258,27 @@ def _write_manifest(out_path, framework, model, dataset_path, seed, n_samples) -
         meta["panel"] = [{"slot": i + 1, "model": m, "model_id": MODELS[m]["model_id"],
                           "base_url": get_model_base_url(m)} for i, m in enumerate(panel)]
         meta["consult_input"] = "report" if framework == "medagents_hetero" else NOREPORT_CONSULT_INPUT
+    if framework == "medagents_reextract":
+        src = source_medagents_path(model, Path(dataset_path).stem, seed)
+        try:
+            with open(src + ".meta.json", encoding="utf-8") as f:
+                src_meta = json.load(f)
+        except Exception:
+            src_meta = {}
+        meta["reused_steps"] = {
+            "steps": "1-2 (expert gathering, 3 analyses): stored raw text; analysis labels re-extracted "
+                     "with the current parse_answer",
+            "live_steps": "3-5 (report, 3 revisions, decision)",
+            "source_file": os.path.abspath(src),
+            "source_sha256": _file_sha256(src),
+            "source_code_version": src_meta.get("code_version"),
+            "source_answer_parser_version": src_meta.get("answer_parser_version"),
+            "source_max_tokens": src_meta.get("max_tokens"),
+            "source_base_url": src_meta.get("base_url"),
+            "calls_reused_per_question": REUSED_CALLS,
+            "calls_live_per_question": LIVE_CALLS,
+            "cost_note": "api_calls / n_llm_calls / tokens cover the live steps 3-5 only",
+        }
     if prev.get("answer_reprocessing"):
         meta["answer_reprocessing"] = prev["answer_reprocessing"]
     with open(meta_path, "w", encoding="utf-8") as f:
@@ -312,6 +375,16 @@ def run_one_seed(
             print(f"  WARNING: {missing} samples lack medical_topic; "
                   "medagents_vi uses generic specialist roles for them.")
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
+
+    if framework == "medagents_reextract":
+        src = source_medagents_path(model, dataset_stem, seed)
+        trails = load_source_trails(src)
+        absent = [s["id"] for s in samples if s["id"] not in trails]
+        if absent:
+            raise SystemExit(f"{src} lacks {len(absent)} dataset ids (first: {absent[:5]}); "
+                             "medagents_reextract needs a complete source run.")
+        _SOURCE_TRAILS[(model, seed)] = trails
+        print(f"  Source: {src} ({len(trails)} complete rows)")
 
     _write_manifest(out_path, framework, model, dataset_path, seed, len(samples))
 

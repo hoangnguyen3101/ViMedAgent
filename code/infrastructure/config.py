@@ -398,7 +398,9 @@ ALL_FRAMEWORKS = TIER1_FRAMEWORKS + TIER2_FRAMEWORKS + TIER3_FRAMEWORKS
 
 # Consultation ablations on a VM14K subset (advisor's experiments A and B). Kept out of
 # ALL_FRAMEWORKS so --all, EXPERIMENT_MATRIX and the paper tables never pick them up.
-ABLATION_FRAMEWORKS = ["medagents_hetero", "medagents_noreport"]   # frameworks/tier3/medagents_ablation.py
+ABLATION_FRAMEWORKS = ["medagents_hetero", "medagents_noreport",   # frameworks/tier3/medagents_ablation.py
+                       "medagents_reextract"]                      # frameworks/tier3/medagents_reextract.py (item 4:
+                                                                   # Steps 1-2 replayed from a stored medagents run, Steps 3-5 live)
 
 # framework -> "tier1"/"tier2"/"tier3", used to place result files under
 # results(_test)/tier{N}/<framework>/ instead of a flat directory.
